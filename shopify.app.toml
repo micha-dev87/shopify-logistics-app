@@ -1,0 +1,32 @@
+# Shopify App Configuration
+# Fichier de configuration pour Shopify CLI
+
+# Informations sur l'application
+name = "Shopify Logistics App"
+application_url = "https://multi.innovvision-group.com"
+embedded = true
+
+# Configuration de l'authentification
+[auth]
+redirect_urls = [
+  "https://multi.innovvision-group.com/api/auth/callback",
+  "https://multi.innovvision-group.com/api/auth/tunnel"
+]
+
+# Ports de développement (modifié pour éviter les conflits)
+[webhooks]
+api_version = "2026-01"
+
+# Port local pour le développement
+[build]
+dev_store_url = ""
+include_config_on_deploy = true
+
+# Points de terminaison de l'application
+[pos]
+embedded = false
+
+# Extensions (si nécessaire dans le futur)
+# [[extensions]]
+# type = "ui"
+# handle = "extension-handle"
