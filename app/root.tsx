@@ -2,7 +2,7 @@ import {
   type LinksFunction,
   type LoaderFunctionArgs,
   json,
-} from "@shopify/remix-oxygen";
+} from "@remix-run/node";
 import {
   Links,
   Meta,
@@ -10,44 +10,28 @@ import {
   Scripts,
   ScrollRestoration,
 } from "@remix-run/react";
-import { AnalyticsScript, ShopifyRoot } from "@shopify/app-bridge-react";
-import { polarisCSS } from "@shopify/polaris";
 import "@shopify/polaris/build/esm/styles.css";
 
-import { logger } from "./lib/logger.server";
-import { HealthCheckService } from "./services/health-check.server";
+export const links: LinksFunction = () => [];
 
-export const links: LinksFunction = () => [
-  { rel: "stylesheet", href: polarisCSS },
-];
-
-export async function loader({ context }: LoaderFunctionArgs) {
-  const healthCheck = new HealthCheckService(context);
-  const health = await healthCheck.check();
-
-  if (!health.healthy) {
-    logger.error("Health check failed", health);
-    throw json({ error: "Health check failed" }, { status: 503 });
-  }
-
+export async function loader({ request }: LoaderFunctionArgs) {
   return json({ healthy: true });
 }
 
 export default function App() {
   return (
-    <ShopifyRoot>
-      <html lang="en">
-        <head>
-          <Meta />
-          <Links />
-        </head>
-        <body>
-          <AnalyticsScript />
-          <ScrollRestoration />
-          <Outlet />
-          <Scripts />
-        </body>
-      </html>
-    </ShopifyRoot>
+    <html lang="en">
+      <head>
+        <meta charSet="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <Meta />
+        <Links />
+      </head>
+      <body>
+        <Outlet />
+        <ScrollRestoration />
+        <Scripts />
+      </body>
+    </html>
   );
 }
