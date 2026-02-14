@@ -7,6 +7,7 @@ COPY package*.json ./
 RUN npm ci
 COPY . .
 RUN npm run build
+RUN mkdir -p /app/prisma
 
 FROM node:20-alpine AS runner
 
