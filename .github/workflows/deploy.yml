@@ -1,3 +1,9 @@
+# ============================================================
+# GitHub Actions - Deploy to VPS Contabo
+# ============================================================
+# Chaque push vers main ou dev declenche un deploiement sur le VPS
+# Flow: SSH → git pull → docker compose build → docker compose up -d
+
 name: Deploy to VPS
 
 on:
@@ -5,100 +11,54 @@ on:
     branches:
       - main
       - dev
-  workflow_dispatch:
-    inputs:
-      environment:
-        description: 'Environment to deploy to'
-        required: true
-        default: 'production'
-        type: choice
-        options:
-          - production
-          - staging
-
-env:
-  VPS_HOST: ${{ secrets.VPS_HOST }}
-  VPS_USER: ${{ secrets.VPS_USER }}
-  VPS_KEY: ${{ secrets.VPS_KEY }}
 
 jobs:
   deploy:
+    name: Deploy to VPS
     runs-on: ubuntu-latest
-    environment:
-      url: https://${{ vars.DOMAIN_NAME || 'your-domain.com' }}
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '18'
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build application
-        run: npm run build
-
-      - name: Build Docker image
+      - name: Determine environment
+        id: env
         run: |
-          docker build -t shopify-logistics-app:${{ github.sha }} .
-          docker tag shopify-logistics-app:${{ github.sha }} shopify-logistics-app:latest
+          if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+            echo "service=shopify-app" >> $GITHUB_OUTPUT
+            echo "container=shopify_app_prod" >> $GITHUB_OUTPUT
+            echo "branch=main" >> $GITHUB_OUTPUT
+          else
+            echo "service=shopify-app-staging" >> $GITHUB_OUTPUT
+            echo "container=shopify_app_staging" >> $GITHUB_OUTPUT
+            echo "branch=dev" >> $GITHUB_OUTPUT
+          fi
 
-      - name: Deploy to VPS
-        uses: appleboy/ssh-action@master
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_KEY }}
+          script_stop: true
           script: |
+            set -e
+            echo "=== Deploying ${{ steps.env.outputs.branch }} ==="
+            echo "Commit: ${{ github.sha }}"
+
+            # 1. Pull le code source
+            cd /root/docker-stack-cyrus/shopify-logistics-app
+            git fetch origin
+            git checkout ${{ steps.env.outputs.branch }}
+            git pull origin ${{ steps.env.outputs.branch }}
+
+            # 2. Build et redemarrer le container cible depuis le docker-compose principal
             cd /root/docker-stack-cyrus
+            docker compose build ${{ steps.env.outputs.service }} --no-cache
+            docker compose up -d ${{ steps.env.outputs.service }}
 
-            # Stop existing app if running
-            docker-compose stop app 2>/dev/null || true
+            # 3. Executer les migrations Prisma
+            sleep 5
+            docker exec ${{ steps.env.outputs.container }} npx prisma migrate deploy || true
 
-            # Remove old app container
-            docker-compose rm -f app 2>/dev/null || true
+            # 4. Cleanup des anciennes images
+            docker image prune -f
 
-            # Copy new Docker image
-            docker image save shopify-logistics-app:${{ github.sha }} | gzip > shopify-logistics-app-${{ github.sha }}.tar.gz
-
-            # Copy to VPS
-            scp shopify-logistics-app-${{ github.sha }}.tar.gz ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/root/docker-stack-cyrus/
-
-            # Load image and tag it
-            ssh ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
-              cd /root/docker-stack-cyrus
-              docker image load -i shopify-logistics-app-${{ github.sha }}.tar.gz
-              docker tag shopify-logistics-app:${{ github.sha }} shopify-logistics-app:latest
-            "
-
-            # Update docker-compose.yml to use latest image
-            ssh ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
-              cd /root/docker-stack-cyrus
-              sed -i 's/image: shopify-logistics-app:latest/image: shopify-logistics-app:latest/' docker-compose.yml || true
-              docker-compose up -d app
-            "
-
-            # Clean up
-            rm shopify-logistics-app-${{ github.sha }}.tar.gz
-
-            # Wait for app to start
-            sleep 30
-
-            # Check health
-            curl -f http://localhost:3000/api/health || exit 1
-
-      - name: Verify deployment
-        run: |
-          # Check health endpoint
-          response=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/api/health)
-          if [ "$response" -eq 200 ]; then
-            echo "✅ Deployment successful"
-          else
-            echo "❌ Health check failed"
-            exit 1
-          fi
+            echo "=== Deploy ${{ steps.env.outputs.branch }} complete ==="
