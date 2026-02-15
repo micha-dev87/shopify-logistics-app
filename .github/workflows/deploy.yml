@@ -89,7 +89,7 @@ jobs:
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_KEY }}
           envs: GHCR_TOKEN,SERVICE,CONTAINER,COMMIT_SHA
-          script_stop: true
+
           script: |
             set -e
             echo "=== Deploying $SERVICE ($COMMIT_SHA) ==="
