@@ -1,10 +1,9 @@
 # ============================================================
-# GitHub Actions - Deploy to VPS Contabo
+# GitHub Actions - Build on GitHub + Deploy to VPS via GHCR
 # ============================================================
-# Chaque push vers main ou dev declenche un deploiement sur le VPS
-# Flow: SSH → git pull → docker compose build → docker compose up -d
+# Push vers main/dev → Build image → Push GHCR → SSH VPS → Pull + Restart
 
-name: Deploy to VPS
+name: Build & Deploy to VPS
 
 on:
   push:
@@ -12,10 +11,59 @@ on:
       - main
       - dev
 
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
 jobs:
+  build-and-push:
+    name: Build & Push Image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Determine environment
+        id: env
+        run: |
+          if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+            echo "tag=latest" >> $GITHUB_OUTPUT
+          else
+            echo "tag=dev" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.env.outputs.tag }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
   deploy:
     name: Deploy to VPS
+    needs: build-and-push
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
 
     steps:
       - name: Determine environment
@@ -24,41 +72,42 @@ jobs:
           if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
             echo "service=shopify-app" >> $GITHUB_OUTPUT
             echo "container=shopify_app_prod" >> $GITHUB_OUTPUT
-            echo "branch=main" >> $GITHUB_OUTPUT
           else
             echo "service=shopify-app-staging" >> $GITHUB_OUTPUT
             echo "container=shopify_app_staging" >> $GITHUB_OUTPUT
-            echo "branch=dev" >> $GITHUB_OUTPUT
           fi
 
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SERVICE: ${{ steps.env.outputs.service }}
+          CONTAINER: ${{ steps.env.outputs.container }}
+          COMMIT_SHA: ${{ github.sha }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_KEY }}
+          envs: GHCR_TOKEN,SERVICE,CONTAINER,COMMIT_SHA
           script_stop: true
           script: |
             set -e
-            echo "=== Deploying ${{ steps.env.outputs.branch }} ==="
-            echo "Commit: ${{ github.sha }}"
+            echo "=== Deploying $SERVICE ($COMMIT_SHA) ==="
 
-            # 1. Pull le code source
-            cd /root/docker-stack-cyrus/shopify-logistics-app
-            git fetch origin
-            git checkout ${{ steps.env.outputs.branch }}
-            git pull origin ${{ steps.env.outputs.branch }}
-
-            # 2. Build et redemarrer le container cible depuis le docker-compose principal
+            # 1. Login GHCR + Pull nouvelle image
+            echo $GHCR_TOKEN | docker login ghcr.io -u ${{ github.actor }} --password-stdin
             cd /root/docker-stack-cyrus
-            docker compose build ${{ steps.env.outputs.service }} --no-cache
-            docker compose up -d ${{ steps.env.outputs.service }}
+            docker compose pull $SERVICE
 
-            # 3. Executer les migrations Prisma
+            # 2. Restart avec la nouvelle image
+            docker compose up -d $SERVICE
+
+            # 3. Migrations Prisma
             sleep 5
-            docker exec ${{ steps.env.outputs.container }} npx prisma migrate deploy || true
+            docker exec $CONTAINER npx prisma migrate deploy || true
 
-            # 4. Cleanup des anciennes images
+            # 4. Cleanup
             docker image prune -f
+            docker logout ghcr.io
 
-            echo "=== Deploy ${{ steps.env.outputs.branch }} complete ==="
+            echo "=== Deploy $SERVICE complete ==="
