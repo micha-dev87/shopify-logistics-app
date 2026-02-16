@@ -18,6 +18,7 @@
   "type": "module",
   "dependencies": {
     "@prisma/client": "^5.22.0",
+    "@remix-run/fs-routes": "^2.15.0",
     "@remix-run/node": "^2.15.0",
     "@remix-run/react": "^2.15.0",
     "@remix-run/serve": "^2.15.0",
