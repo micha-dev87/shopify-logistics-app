@@ -28,9 +28,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     Math.floor(Math.random() * 4)
   ];
   const response = await admin.graphql(
-    \`#graphql
-      mutation populateProduct(\$product: ProductCreateInput!) {
-        productCreate(product: \$product) {
+    `#graphql
+      mutation populateProduct($product: ProductCreateInput!) {
+        productCreate(product: $product) {
           product {
             id
             title
@@ -48,11 +48,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             }
           }
         }
-      }\`,
+      }`,
     {
       variables: {
         product: {
-          title: \`\${color} Snowboard\`,
+          title: `${color} Snowboard`,
         },
       },
     },
@@ -63,9 +63,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const variantId = product.variants.edges[0]!.node!.id!;
 
   const variantResponse = await admin.graphql(
-    \`#graphql
-    mutation shopifyRemixTemplateUpdateVariant(\$productId: ID!, \$variants: [ProductVariantsBulkInput!]!) {
-      productVariantsBulkUpdate(productId: \$productId, variants: \$variants) {
+    `#graphql
+    mutation shopifyRemixTemplateUpdateVariant($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
+      productVariantsBulkUpdate(productId: $productId, variants: $variants) {
         productVariants {
           id
           price
@@ -73,7 +73,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           createdAt
         }
       }
-    }\`,
+    }`,
     {
       variables: {
         productId: product.id,
@@ -174,7 +174,7 @@ export default function Index() {
                   </Button>
                   {fetcher.data?.product && (
                     <Button
-                      url={\`shopify:admin/products/\${productId}\`}
+                      url={`shopify:admin/products/${productId}`}
                       target="_blank"
                       variant="plain"
                     >

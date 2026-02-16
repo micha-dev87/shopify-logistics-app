@@ -1,17 +1,31 @@
-# Dockerfile pour Shopify Logistics App (Remix)
+# Dockerfile for Shopify Logistics App (Remix)
 FROM node:20-alpine AS builder
 
 RUN apk add --no-cache libc6-compat openssl
 WORKDIR /app
+
+# Copy package files
 COPY package*.json ./
+COPY prisma ./prisma/
+
+# Install dependencies
 RUN npm ci
+
+# Generate Prisma client
+RUN npx prisma generate
+
+# Copy source files
 COPY . .
+
+# Build the app
 RUN npm run build
-RUN mkdir -p /app/prisma
 
 FROM node:20-alpine AS runner
 
 WORKDIR /app
+
+# Install OpenSSL for Prisma
+RUN apk add --no-cache openssl
 
 ENV NODE_ENV=production
 ENV PORT=3000
@@ -20,17 +34,15 @@ ENV PORT=3000
 RUN addgroup --system --gid 1001 nodejs \
     && adduser --system --uid 1001 remixuser
 
-# Copy built files
+# Copy built files and dependencies
 COPY --from=builder --chown=remixuser:nodejs /app/build ./build
 COPY --from=builder --chown=remixuser:nodejs /app/node_modules ./node_modules
-COPY --from=builder --chown=remixuser:nodejs /app/package.json ./
+COPY --from=builder --chown=remixuser:nodejs /app/package.json ./package.json
 COPY --from=builder --chown=remixuser:nodejs /app/prisma ./prisma
-
-# Create logs directory
-RUN mkdir -p /app/logs && chown -R remixuser:nodejs /app/logs
 
 USER remixuser
 
 EXPOSE 3000
 
-CMD ["npm", "run", "start"]
+# Start the app (setup runs prisma migrate)
+CMD ["npm", "run", "docker-start"]

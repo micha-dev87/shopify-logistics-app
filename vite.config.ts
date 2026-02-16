@@ -1,7 +1,6 @@
 import { vitePlugin as remix } from "@remix-run/dev";
 import { installGlobals } from "@remix-run/node";
 import { defineConfig, type UserConfig } from "vite";
-import tsconfigPaths from "vite-tsconfig-paths";
 
 installGlobals({ nativeFetch: true });
 
@@ -58,7 +57,6 @@ export default defineConfig({
         v3_routeConfig: true,
       },
     }),
-    tsconfigPaths(),
   ],
   build: {
     assetsInlineLimit: 0,
