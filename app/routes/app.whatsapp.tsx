@@ -1,6 +1,6 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { useLoaderData, useNavigation } from "@remix-run/react";
+import { useLoaderData, useNavigation, useFetcher } from "@remix-run/react";
 import {
   Page,
   Layout,
@@ -18,8 +18,10 @@ import {
   Frame,
   Box,
   Icon,
+  Spinner,
+  Badge,
 } from "@shopify/polaris";
-import { DuplicateIcon } from "@shopify/polaris-icons";
+import { DuplicateIcon, CheckIcon } from "@shopify/polaris-icons";
 import { TitleBar } from "@shopify/app-bridge-react";
 import { useCallback, useState, useEffect } from "react";
 import { authenticate } from "../shopify.server";
@@ -29,7 +31,7 @@ import prisma from "../db.server";
 // LOADER
 // ============================================================
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
+  const { session, admin } = await authenticate.admin(request);
   const shopDomain = session.shop;
 
   const shop = await prisma.shop.findUnique({
@@ -45,7 +47,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   });
 
   if (!shop) {
-    return json({ shop: null });
+    return json({ shop: null, widgetActiveOnStore: false });
   }
 
   // Get support agents for the shop
@@ -62,10 +64,52 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     },
   });
 
+  // Check if widget is already active on the store
+  let widgetActiveOnStore = false;
+  try {
+    const themesResponse = await admin.rest.get({
+      path: "themes",
+    });
+    
+    const themes = themesResponse.body?.themes || [];
+    const mainTheme = themes.find((t: any) => t.role === "main");
+    
+    if (mainTheme) {
+      const settingsResponse = await admin.rest.get({
+        path: `themes/${mainTheme.id}/assets`,
+        query: {
+          "asset[key]": "config/settings_data.json",
+        },
+      });
+
+      if (settingsResponse.body?.asset?.value) {
+        const settingsData = JSON.parse(settingsResponse.body.asset.value);
+        const blocks = settingsData?.current?.blocks || {};
+        const extensionHandle = "whatsapp-widget";
+        const blockHandle = "widget";
+        
+        for (const block of Object.values(blocks)) {
+          const blockType = (block as any)?.type || "";
+          const disabled = (block as any)?.disabled !== false;
+          const settings = (block as any)?.settings || {};
+          
+          if ((blockType.includes(extensionHandle) || blockType.includes(blockHandle)) && 
+              !disabled && settings.enabled !== false) {
+            widgetActiveOnStore = true;
+            break;
+          }
+        }
+      }
+    }
+  } catch (error) {
+    console.error("Error checking widget status:", error);
+  }
+
   return json({
     shop,
     supportAgents,
     widgetScript: generateWidgetScript(shop),
+    widgetActiveOnStore,
   });
 };
 
@@ -338,42 +382,61 @@ export default function WhatsAppPage() {
                     <Text as="h2" variant="headingMd">
                       Installation automatique
                     </Text>
-                    <Banner tone="success">
-                      <Text variant="bodyMd" as="span">Recommandé</Text>
-                    </Banner>
+                    {loaderData.widgetActiveOnStore ? (
+                      <Badge tone="success">
+                        <InlineStack gap="100" blockAlign="center">
+                          <Icon source={CheckIcon} />
+                          <span>Widget actif</span>
+                        </InlineStack>
+                      </Badge>
+                    ) : (
+                      <Badge tone="info">Recommandé</Badge>
+                    )}
                   </InlineStack>
                   
-                  <Text variant="bodyMd">
-                    Le widget WhatsApp est maintenant disponible en tant qu'<strong>App Embed</strong> dans l'éditeur 
-                    de thème Shopify. Activez-le en quelques clics sans modifier le code de votre thème.
-                  </Text>
+                  {loaderData.widgetActiveOnStore ? (
+                    <Banner tone="success">
+                      <Text variant="bodyMd" as="p">
+                        Le widget WhatsApp est actuellement <strong>actif</strong> sur votre boutique. 
+                        Vos clients peuvent voir le bouton WhatsApp flottant sur toutes les pages.
+                      </Text>
+                    </Banner>
+                  ) : (
+                    <>
+                      <Text variant="bodyMd">
+                        Cliquez sur le bouton ci-dessous pour activer automatiquement le widget WhatsApp 
+                        sur votre boutique. Aucune modification manuelle du thème n'est nécessaire.
+                      </Text>
 
-                  <BlockStack gap="200">
-                    <Text variant="bodyMd" as="p">
-                      <strong>1.</strong> Allez dans <em>Online Store → Themes</em>
-                    </Text>
-                    <Text variant="bodyMd" as="p">
-                      <strong>2.</strong> Cliquez sur <em>Customize</em> sur votre thème actif
-                    </Text>
-                    <Text variant="bodyMd" as="p">
-                      <strong>3.</strong> Dans le panneau de gauche, cliquez sur <em>App embeds</em> (icône puzzle)
-                    </Text>
-                    <Text variant="bodyMd" as="p">
-                      <strong>4.</strong> Activez <em>WhatsApp Widget</em>
-                    </Text>
-                    <Text variant="bodyMd" as="p">
-                      <strong>5.</strong> Configurez le numéro et le message directement dans l'éditeur
-                    </Text>
-                    <Text variant="bodyMd" as="p">
-                      <strong>6.</strong> Cliquez sur <em>Save</em>
-                    </Text>
-                  </BlockStack>
+                      <Banner tone="info">
+                        <Text variant="bodyMd" as="p">
+                          Le widget utilisera le numéro WhatsApp et le message par défaut configurés ci-dessus. 
+                          Assurez-vous de les avoir enregistrés avant d'activer le widget.
+                        </Text>
+                      </Banner>
+                    </>
+                  )}
 
                   <Divider />
 
-                  <InlineStack gap="200">
+                  <InlineStack gap="200" blockAlign="center">
+                    <EnableWidgetButton 
+                      phoneNumber={whatsappNumber}
+                      defaultMessage={whatsappMessage}
+                      alreadyEnabled={loaderData.widgetActiveOnStore}
+                      onSuccess={() => {
+                        setToastMessage("Widget WhatsApp activé avec succès !");
+                        setToastError(false);
+                        // Reload to update status
+                        window.location.reload();
+                      }}
+                      onError={(error) => {
+                        setToastMessage(error);
+                        setToastError(true);
+                      }}
+                    />
+                    
                     <Button
-                      primary
                       onClick={() => {
                         window.open(`https://admin.shopify.com/store/${loaderData.shop?.domain.replace('.myshopify.com', '')}/themes/current/editor`, '_blank');
                       }}
@@ -456,5 +519,66 @@ export default function WhatsAppPage() {
         )}
       </Page>
     </Frame>
+  );
+}
+
+// ============================================================
+// ENABLE WIDGET BUTTON COMPONENT
+// ============================================================
+function EnableWidgetButton({ 
+  phoneNumber, 
+  defaultMessage, 
+  alreadyEnabled,
+  onSuccess, 
+  onError 
+}: { 
+  phoneNumber: string; 
+  defaultMessage: string;
+  alreadyEnabled: boolean;
+  onSuccess: () => void; 
+  onError: (error: string) => void;
+}) {
+  const [loading, setLoading] = useState(false);
+
+  const handleEnable = async () => {
+    setLoading(true);
+    try {
+      const response = await fetch("/api/enable-widget", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          phone_number: phoneNumber,
+          default_message: defaultMessage,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        onSuccess();
+      } else {
+        onError(data.error || "Une erreur est survenue");
+      }
+    } catch (error) {
+      onError("Erreur de connexion au serveur");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (alreadyEnabled) {
+    return (
+      <Button disabled icon={<Icon source={CheckIcon} />}>
+        Widget déjà activé
+      </Button>
+    );
+  }
+
+  return (
+    <Button primary onClick={handleEnable} loading={loading}>
+      Activer le widget automatiquement
+    </Button>
   );
 }
