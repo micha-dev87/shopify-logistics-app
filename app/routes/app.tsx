@@ -24,6 +24,10 @@ export default function App() {
         <Link to="/app" rel="home">
           Accueil
         </Link>
+        <Link to="/app/agents">Livreurs</Link>
+        <Link to="/app/bills">Bons de livraison</Link>
+        <Link to="/app/whatsapp">Widget WhatsApp</Link>
+        <Link to="/app/settings">Paramètres</Link>
         <Link to="/app/billing">Plans et Facturation</Link>
       </NavMenu>
       <Outlet />

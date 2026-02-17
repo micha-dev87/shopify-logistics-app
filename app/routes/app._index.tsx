@@ -1,187 +1,294 @@
-import { useEffect } from "react";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { useFetcher } from "@remix-run/react";
+import type { LoaderFunctionArgs } from "@remix-run/node";
+import { json } from "@remix-run/node";
+import { useLoaderData } from "@remix-run/react";
 import {
   Page,
   Layout,
   Text,
   Card,
-  Button,
   BlockStack,
-  Box,
-  List,
-  Link,
   InlineStack,
+  Badge,
+  Box,
+  Divider,
 } from "@shopify/polaris";
-import { TitleBar, useAppBridge } from "@shopify/app-bridge-react";
+import { TitleBar } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
+import { PLAN_BASIC, PLAN_GOLD, PLAN_PRO, PLAN_LIMITS } from "../billing-plans";
+import prisma from "../db.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  await authenticate.admin(request);
+  const { session, billing } = await authenticate.admin(request);
+  const shopDomain = session.shop;
 
-  return null;
+  // Get or create shop record
+  let shop = await prisma.shop.findUnique({
+    where: { domain: shopDomain },
+  });
+
+  // If shop doesn't exist in our DB, create it
+  if (!shop) {
+    shop = await prisma.shop.create({
+      data: {
+        domain: shopDomain,
+        name: shopDomain.replace(".myshopify.com", ""),
+        accessToken: session.accessToken || "",
+      },
+    });
+  }
+
+  // Count active delivery agents
+  const activeAgentsCount = await prisma.deliveryAgent.count({
+    where: {
+      shopId: shop.id,
+      isActive: true,
+    },
+  });
+
+  // Count delivery bills by status
+  const pendingBills = await prisma.deliveryBill.count({
+    where: { shopId: shop.id, status: "PENDING" },
+  });
+
+  const assignedBills = await prisma.deliveryBill.count({
+    where: { shopId: shop.id, status: "ASSIGNED" },
+  });
+
+  const inProgressBills = await prisma.deliveryBill.count({
+    where: { shopId: shop.id, status: "IN_PROGRESS" },
+  });
+
+  const deliveredBills = await prisma.deliveryBill.count({
+    where: { shopId: shop.id, status: "DELIVERED" },
+  });
+
+  const notDeliveredBills = await prisma.deliveryBill.count({
+    where: { shopId: shop.id, status: "NOT_DELIVERED" },
+  });
+
+  // Get plan info
+  const currentPlan = shop.plan || PLAN_BASIC;
+  const planLimit = PLAN_LIMITS[currentPlan] || PLAN_LIMITS[PLAN_BASIC];
+
+  return json({
+    shopName: shop.name,
+    currentPlan,
+    planLimit,
+    activeAgentsCount,
+    pendingBills,
+    assignedBills,
+    inProgressBills,
+    deliveredBills,
+    notDeliveredBills,
+    totalBills: pendingBills + assignedBills + inProgressBills + deliveredBills + notDeliveredBills,
+  });
 };
 
-export const action = async ({ request }: ActionFunctionArgs) => {
-  const { admin } = await authenticate.admin(request);
-  const color = ["Red", "Orange", "Yellow", "Green"][
-    Math.floor(Math.random() * 4)
-  ];
-  const response = await admin.graphql(
-    `#graphql
-      mutation populateProduct($product: ProductCreateInput!) {
-        productCreate(product: $product) {
-          product {
-            id
-            title
-            handle
-            status
-            variants(first: 10) {
-              edges {
-                node {
-                  id
-                  price
-                  barcode
-                  createdAt
-                }
-              }
-            }
-          }
-        }
-      }`,
-    {
-      variables: {
-        product: {
-          title: `${color} Snowboard`,
-        },
-      },
-    },
-  );
-  const responseJson = await response.json();
+export default function DashboardIndex() {
+  const data = useLoaderData<typeof loader>();
 
-  const product = responseJson.data!.productCreate!.product!;
-  const variantId = product.variants.edges[0]!.node!.id!;
-
-  const variantResponse = await admin.graphql(
-    `#graphql
-    mutation shopifyRemixTemplateUpdateVariant($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
-      productVariantsBulkUpdate(productId: $productId, variants: $variants) {
-        productVariants {
-          id
-          price
-          barcode
-          createdAt
-        }
-      }
-    }`,
-    {
-      variables: {
-        productId: product.id,
-        variants: [{ id: variantId, price: "100.00" }],
-      },
-    },
-  );
-
-  const variantResponseJson = await variantResponse.json();
-
-  return {
-    product: responseJson!.data!.productCreate!.product,
-    variant:
-      variantResponseJson!.data!.productVariantsBulkUpdate!.productVariants,
-  };
-};
-
-export default function Index() {
-  const fetcher = useFetcher<typeof action>();
-
-  const shopify = useAppBridge();
-  const isLoading =
-    ["loading", "submitting"].includes(fetcher.state) &&
-    fetcher.formMethod === "POST";
-  const productId = fetcher.data?.product?.id.replace(
-    "gid://shopify/Product/",
-    "",
-  );
-
-  useEffect(() => {
-    if (productId) {
-      shopify.toast.show("Product created");
+  const getPlanBadge = (plan: string) => {
+    switch (plan) {
+      case PLAN_PRO:
+        return <Badge tone="success">Pro</Badge>;
+      case PLAN_GOLD:
+        return <Badge tone="info">Gold</Badge>;
+      default:
+        return <Badge>Basique</Badge>;
     }
-  }, [productId, shopify]);
-  const generateProduct = () => fetcher.submit({}, { method: "POST" });
+  };
 
   return (
     <Page>
-      <TitleBar title="Remix app template">
-        <button variant="primary" onClick={generateProduct}>
-          Generate a product
-        </button>
-      </TitleBar>
+      <TitleBar title="Tableau de bord" />
       <BlockStack gap="500">
+        {/* Header Section */}
         <Layout>
           <Layout.Section>
             <Card>
-              <BlockStack gap="500">
+              <BlockStack gap="300">
+                <InlineStack align="space-between" blockAlign="center">
+                  <Text as="h1" variant="headingLg">
+                    Bienvenue, {data.shopName}
+                  </Text>
+                  {getPlanBadge(data.currentPlan)}
+                </InlineStack>
+                <Text variant="bodyMd" as="p" tone="subdued">
+                  Gérez vos livreurs et suivez vos livraisons depuis ce tableau de bord.
+                </Text>
+              </BlockStack>
+            </Card>
+          </Layout.Section>
+        </Layout>
+
+        {/* Stats Grid */}
+        <Layout>
+          {/* Plan & Agents */}
+          <Layout.Section variant="oneThird">
+            <Card>
+              <BlockStack gap="200">
+                <Text as="h2" variant="headingMd">
+                  Plan actuel
+                </Text>
+                <Divider />
+                <BlockStack gap="100">
+                  <InlineStack align="space-between">
+                    <Text variant="bodyMd">Plan</Text>
+                    <Text variant="bodyMd" fontWeight="semibold">
+                      {data.currentPlan}
+                    </Text>
+                  </InlineStack>
+                  <InlineStack align="space-between">
+                    <Text variant="bodyMd">Livreurs utilisés</Text>
+                    <Text variant="bodyMd" fontWeight="semibold">
+                      {data.activeAgentsCount} / {data.planLimit}
+                    </Text>
+                  </InlineStack>
+                </BlockStack>
+              </BlockStack>
+            </Card>
+          </Layout.Section>
+
+          {/* Active Agents */}
+          <Layout.Section variant="oneThird">
+            <Card>
+              <BlockStack gap="200">
+                <Text as="h2" variant="headingMd">
+                  Livreurs actifs
+                </Text>
+                <Divider />
+                <Box paddingBlock="200">
+                  <Text as="p" variant="heading2xl" alignment="center">
+                    {data.activeAgentsCount}
+                  </Text>
+                </Box>
+              </BlockStack>
+            </Card>
+          </Layout.Section>
+
+          {/* Total Bills */}
+          <Layout.Section variant="oneThird">
+            <Card>
+              <BlockStack gap="200">
+                <Text as="h2" variant="headingMd">
+                  Total bons
+                </Text>
+                <Divider />
+                <Box paddingBlock="200">
+                  <Text as="p" variant="heading2xl" alignment="center">
+                    {data.totalBills}
+                  </Text>
+                </Box>
+              </BlockStack>
+            </Card>
+          </Layout.Section>
+        </Layout>
+
+        {/* Delivery Status Overview */}
+        <Layout>
+          <Layout.Section>
+            <Card>
+              <BlockStack gap="300">
+                <Text as="h2" variant="headingMd">
+                  État des livraisons
+                </Text>
+                <Divider />
+                <Layout>
+                  <Layout.Section variant="oneThird">
+                    <Box padding="300">
+                      <BlockStack gap="100">
+                        <Text variant="bodyMd" tone="subdued">
+                          En attente
+                        </Text>
+                        <Text as="p" variant="headingXl">
+                          {data.pendingBills}
+                        </Text>
+                      </BlockStack>
+                    </Box>
+                  </Layout.Section>
+                  <Layout.Section variant="oneThird">
+                    <Box padding="300">
+                      <BlockStack gap="100">
+                        <Text variant="bodyMd" tone="subdued">
+                          Assignés
+                        </Text>
+                        <Text as="p" variant="headingXl">
+                          {data.assignedBills}
+                        </Text>
+                      </BlockStack>
+                    </Box>
+                  </Layout.Section>
+                  <Layout.Section variant="oneThird">
+                    <Box padding="300">
+                      <BlockStack gap="100">
+                        <Text variant="bodyMd" tone="subdued">
+                          En cours
+                        </Text>
+                        <Text as="p" variant="headingXl">
+                          {data.inProgressBills}
+                        </Text>
+                      </BlockStack>
+                    </Box>
+                  </Layout.Section>
+                </Layout>
+                <Divider />
+                <Layout>
+                  <Layout.Section variant="oneHalf">
+                    <Box padding="300">
+                      <BlockStack gap="100">
+                        <InlineStack align="space-between">
+                          <Text variant="bodyMd" tone="subdued">
+                            Livrés
+                          </Text>
+                          <Badge tone="success">{data.deliveredBills}</Badge>
+                        </InlineStack>
+                      </BlockStack>
+                    </Box>
+                  </Layout.Section>
+                  <Layout.Section variant="oneHalf">
+                    <Box padding="300">
+                      <BlockStack gap="100">
+                        <InlineStack align="space-between">
+                          <Text variant="bodyMd" tone="subdued">
+                            Non livrés
+                          </Text>
+                          <Badge tone="critical">{data.notDeliveredBills}</Badge>
+                        </InlineStack>
+                      </BlockStack>
+                    </Box>
+                  </Layout.Section>
+                </Layout>
+              </BlockStack>
+            </Card>
+          </Layout.Section>
+        </Layout>
+
+        {/* Quick Actions Info */}
+        <Layout>
+          <Layout.Section>
+            <Card>
+              <BlockStack gap="300">
+                <Text as="h2" variant="headingMd">
+                  Démarrage rapide
+                </Text>
+                <Divider />
+                <Text variant="bodyMd" as="p">
+                  Utilisez le menu de navigation pour accéder aux différentes sections de l'application.
+                </Text>
                 <BlockStack gap="200">
-                  <Text as="h2" variant="headingMd">
-                    Congrats on creating a new Shopify app
+                  <Text variant="bodyMd" as="p">
+                    <strong>Livreurs</strong> — Gérez votre équipe de livraison
                   </Text>
                   <Text variant="bodyMd" as="p">
-                    This embedded app template uses{" "}
-                    <Link
-                      url="https://shopify.dev/docs/apps/tools/app-bridge"
-                      target="_blank"
-                      removeUnderline
-                    >
-                      App Bridge
-                    </Link>{" "}
-                    interface examples like an{" "}
-                    <Link url="/app/additional" removeUnderline>
-                      additional page in the app nav
-                    </Link>
-                    , as well as an{" "}
-                    <Link
-                      url="https://shopify.dev/docs/api/admin-graphql"
-                      target="_blank"
-                      removeUnderline
-                    >
-                      Admin GraphQL
-                    </Link>{" "}
-                    mutation demo, to provide a starting point for app
-                    development.
+                    <strong>Bons de livraison</strong> — Consultez et attribuez les commandes
+                  </Text>
+                  <Text variant="bodyMd" as="p">
+                    <strong>Widget WhatsApp</strong> — Configurez le widget client
+                  </Text>
+                  <Text variant="bodyMd" as="p">
+                    <strong>Plans et Facturation</strong> — Gérez votre abonnement
                   </Text>
                 </BlockStack>
-                <BlockStack gap="200">
-                  <Text as="h3" variant="headingMd">
-                    Get started with products
-                  </Text>
-                  <Text as="p" variant="bodyMd">
-                    Generate a product with GraphQL and get the JSON output for
-                    that product. Learn more about the{" "}
-                    <Link
-                      url="https://shopify.dev/docs/api/admin-graphql/latest/mutations/productCreate"
-                      target="_blank"
-                      removeUnderline
-                    >
-                      productCreate
-                    </Link>{" "}
-                    mutation in our API references.
-                  </Text>
-                </BlockStack>
-                <InlineStack gap="300">
-                  <Button loading={isLoading} onClick={generateProduct}>
-                    Generate a product
-                  </Button>
-                  {fetcher.data?.product && (
-                    <Button
-                      url={`shopify:admin/products/${productId}`}
-                      target="_blank"
-                      variant="plain"
-                    >
-                      View product
-                    </Button>
-                  )}
-                </InlineStack>
               </BlockStack>
             </Card>
           </Layout.Section>
