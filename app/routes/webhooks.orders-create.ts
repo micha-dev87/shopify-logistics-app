@@ -2,6 +2,7 @@ import type { ActionFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import crypto from "crypto";
 import prisma from "../db.server";
+import { notifyAgentOfDelivery } from "../telegram.server";
 
 // ============================================================
 // SHOPIFY WEBHOOK: orders/create
@@ -249,13 +250,58 @@ async function assignBestAgent(
       activeBillsCount: selectedAgent._count.deliveryBills,
     });
 
-    // TODO: Trigger Telegram notification (Story 4.1)
-    // For now, just mark telegramNotified as false (will be picked up by notification job)
+    // Trigger Telegram notification if agent has Telegram configured
     if (selectedAgent.telegramUserId) {
-      // Notification will be sent by a background job
-      console.log("[Attribution] Agent has Telegram ID, notification pending", {
-        telegramUserId: selectedAgent.telegramUserId,
-      });
+      try {
+        // Fetch agent with shop relation for notification
+        const agentWithShop = await prisma.deliveryAgent.findUnique({
+          where: { id: selectedAgent.id },
+          include: { shop: true },
+        });
+
+        if (agentWithShop?.shop.telegramBotToken) {
+          const updatedBill = await prisma.deliveryBill.findUnique({
+            where: { id: billId },
+          });
+
+          if (updatedBill) {
+            const notifResult = await notifyAgentOfDelivery(
+              agentWithShop as any,
+              updatedBill,
+              agentWithShop.shop.telegramBotToken,
+            );
+
+            if (notifResult.success) {
+              await prisma.deliveryBill.update({
+                where: { id: billId },
+                data: {
+                  telegramNotified: true,
+                  telegramMessageId: notifResult.messageId?.toString() || null,
+                },
+              });
+
+              console.log("[Attribution] Telegram notification sent", {
+                billId,
+                agentId: selectedAgent.id,
+                messageId: notifResult.messageId,
+              });
+            } else {
+              console.error("[Attribution] Telegram notification failed", {
+                billId,
+                agentId: selectedAgent.id,
+                error: notifResult.error,
+              });
+            }
+          }
+        } else {
+          console.log("[Attribution] No Telegram bot token configured for shop", {
+            shopId,
+          });
+        }
+      } catch (notifError) {
+        // Don't fail the attribution if notification fails
+        console.error("[Attribution] Error sending Telegram notification:", notifError);
+      }
     }
   } catch (error) {
     console.error("[Attribution] Error in assignment algorithm:", error);
