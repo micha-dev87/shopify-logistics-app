@@ -14,7 +14,9 @@ import { AppProvider } from "@shopify/polaris";
 import enTranslations from "@shopify/polaris/locales/en.json";
 import "@shopify/polaris/build/esm/styles.css";
 
-export const links: LinksFunction = () => [];
+export const links: LinksFunction = () => [
+  { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" },
+];
 
 export async function loader({ request }: LoaderFunctionArgs) {
   return json({ healthy: true });
