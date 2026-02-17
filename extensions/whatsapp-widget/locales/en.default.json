@@ -1,0 +1,39 @@
+{
+  "whatsapp-widget": {
+    "name": "WhatsApp Widget",
+    "description": "Displays a floating WhatsApp button on your store for customer support"
+  },
+  "settings": {
+    "enabled": {
+      "label": "Enable WhatsApp Widget"
+    },
+    "phone_number": {
+      "label": "WhatsApp Number",
+      "info": "International format without + (e.g., 33612345678 for France)"
+    },
+    "default_message": {
+      "label": "Default Message",
+      "info": "Pre-filled message the customer will send"
+    },
+    "button_size": {
+      "label": "Button Size"
+    },
+    "icon_size": {
+      "label": "Icon Size"
+    },
+    "button_color": {
+      "label": "Button Color"
+    },
+    "bottom_position": {
+      "label": "Position from Bottom"
+    },
+    "right_position": {
+      "label": "Position from Right"
+    }
+  },
+  "general": {
+    "accessibility": {
+      "whatsapp_link": "Contact via WhatsApp"
+    }
+  }
+}

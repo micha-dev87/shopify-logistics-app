@@ -1,0 +1,39 @@
+{
+  "whatsapp-widget": {
+    "name": "WhatsApp Widget",
+    "description": "Affiche un bouton WhatsApp flottant sur votre boutique pour le service client"
+  },
+  "settings": {
+    "enabled": {
+      "label": "Activer le widget WhatsApp"
+    },
+    "phone_number": {
+      "label": "Numéro WhatsApp",
+      "info": "Format international sans le + (ex: 33612345678)"
+    },
+    "default_message": {
+      "label": "Message par défaut",
+      "info": "Message pré-rempli que le client enverra"
+    },
+    "button_size": {
+      "label": "Taille du bouton"
+    },
+    "icon_size": {
+      "label": "Taille de l'icône"
+    },
+    "button_color": {
+      "label": "Couleur du bouton"
+    },
+    "bottom_position": {
+      "label": "Position depuis le bas"
+    },
+    "right_position": {
+      "label": "Position depuis la droite"
+    }
+  },
+  "general": {
+    "accessibility": {
+      "whatsapp_link": "Contacter via WhatsApp"
+    }
+  }
+}

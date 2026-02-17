@@ -2,31 +2,36 @@
 # Fichier de configuration pour Shopify CLI
 
 # Informations sur l'application
-name = "Shopify Logistics App"
+name = "Multi Logistics App"
 application_url = "https://multi.innovvision-group.com"
 embedded = true
+client_id = "38f120638bf60cc78c44d287cf968e98"
 
 # Configuration de l'authentification
 [auth]
 redirect_urls = [
-  "https://multi.innovvision-group.com/api/auth/callback",
+  "https://multi.innovvision-group.com/auth/callback",
   "https://multi.innovvision-group.com/api/auth/tunnel"
 ]
 
-# Ports de développement (modifié pour éviter les conflits)
+# Webhooks configuration
 [webhooks]
 api_version = "2026-01"
 
-# Port local pour le développement
+# Build configuration
 [build]
 dev_store_url = ""
 include_config_on_deploy = true
 
-# Points de terminaison de l'application
+# Access scopes
+[access_scopes]
+scopes = "read_orders,write_orders,read_products,write_products,read_customers,write_script_tags,read_themes,write_themes"
+use_legacy_install_flow = false
+direct_webhook_path = "/webhooks"
+
+# Application configuration
 [pos]
 embedded = false
 
-# Extensions (si nécessaire dans le futur)
-# [[extensions]]
-# type = "ui"
-# handle = "extension-handle"
+# Extensions - Theme App Extension for WhatsApp Widget
+# The extension is located in /extensions/whatsapp-widget

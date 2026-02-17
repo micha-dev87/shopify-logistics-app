@@ -1,0 +1,8 @@
+# WhatsApp Widget Theme App Extension
+# This creates an app embed that merchants can enable in the theme editor
+# No need to manually edit theme.liquid
+
+api_version = "2026-01"
+type = "theme_app_extension"
+name = "WhatsApp Widget"
+handle = "whatsapp-widget"

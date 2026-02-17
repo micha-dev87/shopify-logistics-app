@@ -329,14 +329,77 @@ export default function WhatsAppPage() {
             </Layout.Section>
           </Layout>
 
-          {/* Installation Instructions */}
+          {/* Automatic Installation */}
           <Layout>
             <Layout.Section>
               <Card>
                 <BlockStack gap="400">
-                  <Text as="h2" variant="headingMd">
-                    Installation du widget
+                  <InlineStack gap="200" blockAlign="center">
+                    <Text as="h2" variant="headingMd">
+                      Installation automatique
+                    </Text>
+                    <Banner tone="success">
+                      <Text variant="bodyMd" as="span">Recommandé</Text>
+                    </Banner>
+                  </InlineStack>
+                  
+                  <Text variant="bodyMd">
+                    Le widget WhatsApp est maintenant disponible en tant qu'<strong>App Embed</strong> dans l'éditeur 
+                    de thème Shopify. Activez-le en quelques clics sans modifier le code de votre thème.
                   </Text>
+
+                  <BlockStack gap="200">
+                    <Text variant="bodyMd" as="p">
+                      <strong>1.</strong> Allez dans <em>Online Store → Themes</em>
+                    </Text>
+                    <Text variant="bodyMd" as="p">
+                      <strong>2.</strong> Cliquez sur <em>Customize</em> sur votre thème actif
+                    </Text>
+                    <Text variant="bodyMd" as="p">
+                      <strong>3.</strong> Dans le panneau de gauche, cliquez sur <em>App embeds</em> (icône puzzle)
+                    </Text>
+                    <Text variant="bodyMd" as="p">
+                      <strong>4.</strong> Activez <em>WhatsApp Widget</em>
+                    </Text>
+                    <Text variant="bodyMd" as="p">
+                      <strong>5.</strong> Configurez le numéro et le message directement dans l'éditeur
+                    </Text>
+                    <Text variant="bodyMd" as="p">
+                      <strong>6.</strong> Cliquez sur <em>Save</em>
+                    </Text>
+                  </BlockStack>
+
+                  <Divider />
+
+                  <InlineStack gap="200">
+                    <Button
+                      primary
+                      onClick={() => {
+                        window.open(`https://admin.shopify.com/store/${loaderData.shop?.domain.replace('.myshopify.com', '')}/themes/current/editor`, '_blank');
+                      }}
+                    >
+                      Ouvrir l'éditeur de thème
+                    </Button>
+                  </InlineStack>
+                </BlockStack>
+              </Card>
+            </Layout.Section>
+          </Layout>
+
+          {/* Manual Installation (Fallback) */}
+          <Layout>
+            <Layout.Section>
+              <Card>
+                <BlockStack gap="400">
+                  <InlineStack gap="200" blockAlign="center">
+                    <Text as="h2" variant="headingMd">
+                      Installation manuelle
+                    </Text>
+                    <Text variant="bodySm" tone="subdued">
+                      Alternative si l'installation automatique ne fonctionne pas
+                    </Text>
+                  </InlineStack>
+                  
                   <Text variant="bodyMd" tone="subdued">
                     Copiez ce code et ajoutez-le dans votre thème Shopify (Online Store → Themes → Edit code →
                     theme.liquid, avant la balise &lt;/body&gt;).
@@ -370,7 +433,7 @@ export default function WhatsAppPage() {
                         <pre style={{
                           whiteSpace: "pre-wrap",
                           wordBreak: "break-all",
-                          maxHeight: 300,
+                          maxHeight: 200,
                           overflow: "auto",
                           margin: 0,
                           fontSize: 12,
@@ -381,29 +444,6 @@ export default function WhatsAppPage() {
                       </Box>
                     </BlockStack>
                   </Box>
-
-                  <Divider />
-
-                  <BlockStack gap="200">
-                    <Text as="h3" variant="headingMd">
-                      Instructions détaillées:
-                    </Text>
-                    <Text variant="bodyMd" as="p">
-                      <strong>1.</strong> Allez dans Online Store → Themes
-                    </Text>
-                    <Text variant="bodyMd" as="p">
-                      <strong>2.</strong> Cliquez sur "..." à côté de votre thème actif → Edit code
-                    </Text>
-                    <Text variant="bodyMd" as="p">
-                      <strong>3.</strong> Trouvez le fichier theme.liquid dans le dossier Layout
-                    </Text>
-                    <Text variant="bodyMd" as="p">
-                      <strong>4.</strong> Collez le code juste avant la balise &lt;/body&gt; à la fin du fichier
-                    </Text>
-                    <Text variant="bodyMd" as="p">
-                      <strong>5.</strong> Cliquez sur Save
-                    </Text>
-                  </BlockStack>
                 </BlockStack>
               </Card>
             </Layout.Section>
