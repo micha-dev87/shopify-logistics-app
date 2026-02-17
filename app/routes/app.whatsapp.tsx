@@ -17,7 +17,6 @@ import {
   Toast,
   Frame,
   Box,
-  Code,
   Icon,
 } from "@shopify/polaris";
 import { DuplicateIcon } from "@shopify/polaris-icons";
@@ -361,11 +360,25 @@ export default function WhatsAppPage() {
                           Copier
                         </Button>
                       </InlineStack>
-                      <Code>
-                        <pre style={{ whiteSpace: "pre-wrap", wordBreak: "break-all", maxHeight: 300, overflow: "auto" }}>
+                      <Box
+                        background="bg-surface"
+                        padding="300"
+                        borderRadius="100"
+                        borderColor="border"
+                        borderWidth="025"
+                      >
+                        <pre style={{
+                          whiteSpace: "pre-wrap",
+                          wordBreak: "break-all",
+                          maxHeight: 300,
+                          overflow: "auto",
+                          margin: 0,
+                          fontSize: 12,
+                          fontFamily: "monospace"
+                        }}>
                           {widgetScript}
                         </pre>
-                      </Code>
+                      </Box>
                     </BlockStack>
                   </Box>
 
