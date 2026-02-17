@@ -44,9 +44,19 @@ model Shop {
   id          String   @id @default(cuid())
   domain      String   @unique  // myshop.myshopify.com
   name        String
-  plan        String?  // billing plan: basic, gold, pro
+  plan        String?  // billing plan: Basique, Gold, Pro
   accessToken String   // Shopify API access token
   isActive    Boolean  @default(true)
+  
+  // Telegram configuration
+  telegramBotToken    String?  // Bot token for sending notifications
+  telegramWebhookSet  Boolean  @default(false)
+  
+  // WhatsApp widget configuration
+  whatsappNumber   String?  // Support WhatsApp number
+  whatsappMessage  String?  // Default message for widget
+  widgetEnabled    Boolean  @default(true)
+  
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
