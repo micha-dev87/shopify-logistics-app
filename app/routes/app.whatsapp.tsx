@@ -18,8 +18,9 @@ import {
   Frame,
   Box,
   Code,
-  CopyButton,
+  Icon,
 } from "@shopify/polaris";
+import { DuplicateIcon } from "@shopify/polaris-icons";
 import { TitleBar } from "@shopify/app-bridge-react";
 import { useCallback, useState, useEffect } from "react";
 import { authenticate } from "../shopify.server";
@@ -348,7 +349,17 @@ export default function WhatsAppPage() {
                         <Text variant="bodyMd" fontWeight="semibold">
                           Code à copier
                         </Text>
-                        <CopyButton content={widgetScript} />
+                        <Button
+                          size="slim"
+                          onClick={() => {
+                            navigator.clipboard.writeText(widgetScript);
+                            setToastMessage("Code copié dans le presse-papiers");
+                            setToastError(false);
+                          }}
+                          icon={<Icon source={DuplicateIcon} />}
+                        >
+                          Copier
+                        </Button>
                       </InlineStack>
                       <Code>
                         <pre style={{ whiteSpace: "pre-wrap", wordBreak: "break-all", maxHeight: 300, overflow: "auto" }}>
