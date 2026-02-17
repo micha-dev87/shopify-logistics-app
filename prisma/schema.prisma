@@ -11,6 +11,11 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// ============================================================
+// Shopify Session Storage (managed by @shopify/shopify-app-session-storage-prisma)
+// DO NOT MODIFY - required by Shopify App Remix template
+// ============================================================
+
 model Session {
   id                  String    @id
   shop                String
@@ -29,4 +34,97 @@ model Session {
   emailVerified       Boolean?  @default(false)
   refreshToken        String?
   refreshTokenExpires DateTime?
+}
+
+// ============================================================
+// Application Models - Multi-tenant via shopId
+// ============================================================
+
+model Shop {
+  id          String   @id @default(cuid())
+  domain      String   @unique  // myshop.myshopify.com
+  name        String
+  plan        String?  // billing plan: basic, gold, pro
+  accessToken String   // Shopify API access token
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  deliveryAgents DeliveryAgent[]
+  deliveryBills  DeliveryBill[]
+
+  @@index([domain])
+}
+
+model DeliveryAgent {
+  id             String    @id @default(cuid())
+  shopId         String
+  name           String
+  phone          String    // Phone number for WhatsApp/contact
+  country        String    // ISO country code (e.g., "CI")
+  city           String?
+  role           AgentRole @default(COURIER)
+  telegramUserId String?   // Telegram user ID for bot notifications
+  isActive       Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  shop          Shop           @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  deliveryBills DeliveryBill[]
+
+  @@index([shopId, country, city, isActive])
+  @@index([shopId, isActive])
+}
+
+model DeliveryBill {
+  id              String   @id @default(cuid())
+  shopId          String
+  orderId         String   @unique  // Shopify order ID - idempotency key
+  orderName       String?  // Shopify order name (#1001, etc.)
+  customerName    String
+  customerAddress String
+  customerPhone   String?
+
+  assignedAgentId String?
+  assignedAgent   DeliveryAgent? @relation(fields: [assignedAgentId], references: [id], onDelete: SetNull)
+
+  productTitle    String
+  productImage    String?
+  productQuantity Int
+
+  status          DeliveryStatus @default(PENDING)
+  statusHistory   Json?          // [{status, timestamp, agent?}]
+
+  deliveryNotes     String?
+  deliveryPhoto     String?
+  telegramNotified  Boolean  @default(false)
+  telegramMessageId String?  // For callback updates
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@index([shopId, status])
+  @@index([shopId, createdAt])
+  @@index([assignedAgentId])
+}
+
+// ============================================================
+// Enums
+// ============================================================
+
+enum AgentRole {
+  COURIER  // Livreur - receives order notifications
+  SUPPORT  // Service Client - appears in WhatsApp widget
+  BOTH     // Both roles
+}
+
+enum DeliveryStatus {
+  PENDING       // Awaiting assignment
+  ASSIGNED      // Assigned to a delivery agent
+  IN_PROGRESS   // Picked up by agent
+  DELIVERED     // Successfully delivered
+  NOT_DELIVERED // Delivery failed
+  CANCELLED     // Order cancelled
 }
