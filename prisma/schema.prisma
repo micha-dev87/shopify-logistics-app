@@ -76,6 +76,7 @@ model DeliveryAgent {
   role           AgentRole @default(COURIER)
   telegramUserId String?   // Telegram user ID for bot notifications
   isActive       Boolean   @default(true)
+  showInWidget   Boolean   @default(false) // Whether this agent appears in the WhatsApp widget
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
