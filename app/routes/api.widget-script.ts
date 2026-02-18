@@ -6,7 +6,7 @@ import prisma from "../db.server";
  * This endpoint serves the WhatsApp widget JavaScript code with dynamic configuration
  * based on the shop's settings in the database.
  * 
- * Usage: <script src="https://multi.innovvision-group.com/api/whatsapp-widget.js?shop=shop.myshopify.com"></script>
+ * Usage: <script src="https://multi.innovvision-group.com/api/widget-script?shop=shop.myshopify.com"></script>
  */
 export async function loader({ request }: LoaderFunctionArgs) {
   const url = new URL(request.url);

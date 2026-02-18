@@ -72,7 +72,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     });
     const tags = (scriptTags as any)?.body?.script_tags || [];
     const widgetTag = tags.find((tag: any) => 
-      tag.src.includes("/api/whatsapp-widget.js") || 
+      tag.src.includes("/api/widget-script") || 
       tag.src.includes("whatsapp-widget")
     );
     widgetActiveOnStore = !!widgetTag;
@@ -139,7 +139,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         // ScriptTag API uses write_script_tags scope which may already be available
         
         const appUrl = process.env.SHOPIFY_APP_URL || "https://multi.innovvision-group.com";
-        const widgetScriptUrl = `${appUrl}/api/whatsapp-widget.js?shop=${shopDomain}`;
+        const widgetScriptUrl = `${appUrl}/api/widget-script?shop=${shopDomain}`;
         
         // First, check if script tag already exists
         const existingScripts = await admin.rest.get({
@@ -147,7 +147,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         });
         const scriptTags = (existingScripts as any)?.body?.script_tags || [];
         const existingTag = scriptTags.find((tag: any) => 
-          tag.src.includes("/api/whatsapp-widget.js") || 
+          tag.src.includes("/api/widget-script") || 
           tag.src.includes("whatsapp-widget")
         );
         
