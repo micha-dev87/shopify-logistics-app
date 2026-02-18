@@ -320,7 +320,8 @@ function generateMultiStepWidget(
     // Add click handlers
     var countryEls = content.querySelectorAll('.wa-country');
     for (var i = 0; i < countryEls.length; i++) {
-      countryEls[i].addEventListener('click', function() {
+      countryEls[i].addEventListener('click', function(e) {
+        e.stopPropagation();
         var code = this.getAttribute('data-code');
         var country = countries.find(function(c) { return c.code === code; });
         if (country) showContacts(country);
@@ -363,7 +364,8 @@ function generateMultiStepWidget(
     // Add click handlers
     var contactEls = content.querySelectorAll('.wa-contact');
     for (var i = 0; i < contactEls.length; i++) {
-      contactEls[i].addEventListener('click', function() {
+      contactEls[i].addEventListener('click', function(e) {
+        e.stopPropagation();
         var phone = this.getAttribute('data-phone');
         var name = this.getAttribute('data-name');
         openWhatsApp(phone, name);
