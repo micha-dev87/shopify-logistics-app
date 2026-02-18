@@ -64,49 +64,22 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     },
   });
 
-  // Check if widget is already active on the store via GraphQL
-  let widgetActiveOnStore = false;
+  // Check if widget is already active on the store via ScriptTag API
+  let widgetActiveOnStore = shop?.widgetEnabled ?? false;
   try {
-    const themeQuery = await admin.graphql(`{
-      themes(first: 10, roles: MAIN) {
-        nodes {
-          id
-          name
-          role
-          files(filenames: "config/settings_data.json", first: 1) {
-            nodes {
-              filename
-              body {
-                ... on OnlineStoreThemeFileBodyText {
-                  content
-                }
-              }
-            }
-          }
-        }
-      }
-    }`);
-    const themeData = await themeQuery.json();
-    const mainTheme = themeData?.data?.themes?.nodes?.[0];
-    
-    if (mainTheme?.files?.nodes?.[0]?.body?.content) {
-      const settingsData = JSON.parse(mainTheme.files.nodes[0].body.content);
-      const blocks = settingsData?.current?.blocks || {};
-      
-      for (const block of Object.values(blocks)) {
-        const blockType = (block as any)?.type || "";
-        const disabled = (block as any)?.disabled !== false;
-        const settings = (block as any)?.settings || {};
-        
-        if ((blockType.includes("whatsapp-widget") || blockType.includes("widget")) && 
-            !disabled && settings.enabled !== false) {
-          widgetActiveOnStore = true;
-          break;
-        }
-      }
-    }
+    const scriptTags = await admin.rest.get({
+      path: "script_tags",
+    });
+    const tags = (scriptTags as any)?.body?.script_tags || [];
+    const widgetTag = tags.find((tag: any) => 
+      tag.src.includes("/api/whatsapp-widget.js") || 
+      tag.src.includes("whatsapp-widget")
+    );
+    widgetActiveOnStore = !!widgetTag;
   } catch (error) {
-    console.error("Error checking widget status:", error);
+    console.error("Error checking script tags:", error);
+    // Fall back to database flag if API fails
+    widgetActiveOnStore = shop?.widgetEnabled ?? false;
   }
 
   return json({
@@ -162,120 +135,73 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const phoneNumber = formData.get("phoneNumber") as string || "";
         const defaultMessage = formData.get("defaultMessage") as string || "Bonjour, j'ai une question concernant ma livraison.";
 
-        // Step 1: Get the main theme and its settings_data.json via GraphQL
-        const themeQuery = await admin.graphql(`{
-          themes(first: 10, roles: MAIN) {
-            nodes {
-              id
-              name
-              role
-              files(filenames: "config/settings_data.json", first: 1) {
-                nodes {
-                  filename
-                  body {
-                    ... on OnlineStoreThemeFileBodyText {
-                      content
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }`);
-        const themeData = await themeQuery.json();
-        const mainTheme = themeData?.data?.themes?.nodes?.[0];
-
-        if (!mainTheme) {
-          return json({ error: "Aucun thème principal trouvé" }, { status: 404 });
+        // Use ScriptTag API instead of Theme API (avoids read_themes/write_themes scope requirement)
+        // ScriptTag API uses write_script_tags scope which may already be available
+        
+        const appUrl = process.env.SHOPIFY_APP_URL || "https://multi.innovvision-group.com";
+        const widgetScriptUrl = `${appUrl}/api/whatsapp-widget.js?shop=${shopDomain}`;
+        
+        // First, check if script tag already exists
+        const existingScripts = await admin.rest.get({
+          path: "script_tags",
+        });
+        const scriptTags = (existingScripts as any)?.body?.script_tags || [];
+        const existingTag = scriptTags.find((tag: any) => 
+          tag.src.includes("/api/whatsapp-widget.js") || 
+          tag.src.includes("whatsapp-widget")
+        );
+        
+        if (existingTag) {
+          // Script tag already exists, just update the shop config
+          await prisma.shop.update({
+            where: { id: shop.id },
+            data: {
+              whatsappNumber: phoneNumber.replace(/[\s+-]/g, "") || null,
+              whatsappMessage: defaultMessage,
+              widgetEnabled: true,
+            },
+          });
+          return json({ success: true, message: "Widget WhatsApp déjà activé ! Configuration mise à jour." });
         }
-
-        const themeGid = mainTheme.id; // format: gid://shopify/OnlineStoreTheme/123456
-
-        // Step 2: Parse current settings_data.json
-        let settingsData: any = {};
-        const fileContent = mainTheme?.files?.nodes?.[0]?.body?.content;
-        if (fileContent) {
-          try {
-            settingsData = JSON.parse(fileContent);
-          } catch (e) {
-            settingsData = { current: {} };
-          }
-        }
-
-        // Ensure structure exists
-        if (!settingsData.current) settingsData.current = {};
-        if (!settingsData.current.blocks) settingsData.current.blocks = {};
-        if (!settingsData.current.block_order) settingsData.current.block_order = [];
-
-        // Step 3: Check if app embed already exists
-        const extensionHandle = "whatsapp-widget";
-        const blockHandle = "widget";
-        let existingBlockId: string | null = null;
-
-        for (const [blockId, block] of Object.entries(settingsData.current.blocks)) {
-          const blockType = (block as any)?.type || "";
-          if (blockType.includes(extensionHandle) || blockType.includes(blockHandle)) {
-            existingBlockId = blockId;
-            break;
-          }
-        }
-
-        const blockId = existingBlockId || (Date.now().toString() + Math.floor(Math.random() * 1000000000).toString().padStart(9, "0")).slice(-20);
-        const apiKey = process.env.SHOPIFY_API_KEY || "38f120638bf60cc78c44d287cf968e98";
-
-        // Step 4: Create or update the app embed block
-        settingsData.current.blocks[blockId] = {
-          type: `shopify://apps/${extensionHandle}/blocks/${blockHandle}/${apiKey}`,
-          disabled: false,
-          settings: {
-            enabled: true,
-            phone_number: phoneNumber,
-            default_message: defaultMessage,
-            button_size: 60,
-            icon_size: 32,
-            button_color: "#25D366",
-            bottom_position: 20,
-            right_position: 20,
-          },
-        };
-
-        if (!settingsData.current.block_order.includes(blockId)) {
-          settingsData.current.block_order.push(blockId);
-        }
-
-        // Step 5: Save updated settings_data.json via GraphQL themeFilesUpsert
-        const updatedContent = JSON.stringify(settingsData, null, 2);
-        const upsertMutation = await admin.graphql(`
-          mutation themeFilesUpsert($id: ID!, $files: [OnlineStoreThemeFilesUpsertFileInput!]!) {
-            themeFilesUpsert(themeId: $id, files: $files) {
-              upsertedThemeFiles {
-                filename
-              }
-              userErrors {
-                field
-                message
-              }
-            }
-          }
-        `, {
-          variables: {
-            id: themeGid,
-            files: [{
-              filename: "config/settings_data.json",
-              body: {
-                type: "TEXT",
-                value: updatedContent,
-              },
-            }],
+        
+        // Create new script tag
+        const scriptTagResponse = await admin.rest.post({
+          path: "script_tags",
+          data: {
+            script_tag: {
+              event: "onload",
+              src: widgetScriptUrl,
+              display_scope: "all",
+            },
           },
         });
-
-        const upsertData = await upsertMutation.json();
-        const userErrors = upsertData?.data?.themeFilesUpsert?.userErrors || [];
-
-        if (userErrors.length > 0) {
-          return json({ error: `Erreur: ${userErrors.map((e: any) => e.message).join(", ")}` }, { status: 400 });
+        
+        const responseData = scriptTagResponse as any;
+        
+        if (responseData?.body?.errors || responseData?.status >= 400) {
+          const errorMsg = responseData?.body?.errors || 
+                          responseData?.body?.error || 
+                          "Erreur lors de la création du script tag";
+          
+          // If script_tags scope is missing, fall back to manual installation instructions
+          if (JSON.stringify(errorMsg).includes("access") || JSON.stringify(errorMsg).includes("scope")) {
+            return json({ 
+              error: "L'application nécessite le scope 'write_script_tags'. Veuillez mettre à jour les permissions de l'app dans Shopify Partners Dashboard, puis réinstaller l'app." 
+            }, { status: 400 });
+          }
+          
+          return json({ error: `Erreur Shopify: ${JSON.stringify(errorMsg)}` }, { status: 400 });
         }
+        
+        // Update shop config
+        await prisma.shop.update({
+          where: { id: shop.id },
+          data: {
+            whatsappNumber: phoneNumber.replace(/[\s+-]/g, "") || null,
+            whatsappMessage: defaultMessage,
+            widgetEnabled: true,
+          },
+        });
 
         return json({ success: true, message: "Widget WhatsApp activé avec succès sur votre boutique !" });
       }
