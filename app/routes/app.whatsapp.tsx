@@ -117,7 +117,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 // ACTION
 // ============================================================
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
+  const { session, admin } = await authenticate.admin(request);
   const shopDomain = session.shop;
   const formData = await request.formData();
   const actionType = formData.get("actionType") as string;
@@ -154,11 +154,100 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         return json({ success: true, message: "Configuration du widget enregistrée" });
       }
 
+      case "enableWidget": {
+        const phoneNumber = formData.get("phoneNumber") as string || "";
+        const defaultMessage = formData.get("defaultMessage") as string || "Bonjour, j'ai une question concernant ma livraison.";
+
+        // Step 1: Get the main theme ID
+        const themesResponse = await admin.rest.get({ path: "themes" });
+        const themes = themesResponse.body?.themes || [];
+        const mainTheme = themes.find((t: any) => t.role === "main");
+
+        if (!mainTheme) {
+          return json({ error: "Aucun thème principal trouvé" }, { status: 404 });
+        }
+
+        const themeId = mainTheme.id;
+
+        // Step 2: Get current settings_data.json
+        const settingsResponse = await admin.rest.get({
+          path: `themes/${themeId}/assets`,
+          query: { "asset[key]": "config/settings_data.json" },
+        });
+
+        let settingsData: any = {};
+        if (settingsResponse.body?.asset?.value) {
+          try {
+            settingsData = JSON.parse(settingsResponse.body.asset.value);
+          } catch (e) {
+            settingsData = { current: {} };
+          }
+        }
+
+        // Ensure structure exists
+        if (!settingsData.current) settingsData.current = {};
+        if (!settingsData.current.blocks) settingsData.current.blocks = {};
+        if (!settingsData.current.block_order) settingsData.current.block_order = [];
+
+        // Step 3: Check if app embed already exists
+        const extensionHandle = "whatsapp-widget";
+        const blockHandle = "widget";
+        let existingBlockId: string | null = null;
+
+        for (const [blockId, block] of Object.entries(settingsData.current.blocks)) {
+          const blockType = (block as any)?.type || "";
+          if (blockType.includes(extensionHandle) || blockType.includes(blockHandle)) {
+            existingBlockId = blockId;
+            break;
+          }
+        }
+
+        const blockId = existingBlockId || (Date.now().toString() + Math.floor(Math.random() * 1000000000).toString().padStart(9, "0")).slice(-20);
+        const apiKey = process.env.SHOPIFY_API_KEY || "38f120638bf60cc78c44d287cf968e98";
+
+        // Step 4: Create or update the app embed block
+        settingsData.current.blocks[blockId] = {
+          type: `shopify://apps/${extensionHandle}/blocks/${blockHandle}/${apiKey}`,
+          disabled: false,
+          settings: {
+            enabled: true,
+            phone_number: phoneNumber,
+            default_message: defaultMessage,
+            button_size: 60,
+            icon_size: 32,
+            button_color: "#25D366",
+            bottom_position: 20,
+            right_position: 20,
+          },
+        };
+
+        if (!settingsData.current.block_order.includes(blockId)) {
+          settingsData.current.block_order.push(blockId);
+        }
+
+        // Step 5: Save updated settings_data.json
+        await admin.rest.put({
+          path: `themes/${themeId}/assets`,
+          data: {
+            asset: {
+              key: "config/settings_data.json",
+              value: JSON.stringify(settingsData, null, 2),
+            },
+          },
+        });
+
+        return json({ success: true, message: "Widget WhatsApp activé avec succès sur votre boutique !" });
+      }
+
       default:
         return json({ error: "Action non reconnue" }, { status: 400 });
     }
-  } catch (error) {
+  } catch (error: any) {
     console.error("Widget action error:", error);
+    const shopifyError = error?.response?.body?.errors;
+    if (shopifyError) {
+      return json({ error: `Erreur Shopify: ${JSON.stringify(shopifyError)}` }, { status: 400 });
+    }
     return json({ error: "Une erreur est survenue" }, { status: 500 });
   }
 };
@@ -538,35 +627,16 @@ function EnableWidgetButton({
   onSuccess: () => void; 
   onError: (error: string) => void;
 }) {
-  const [loading, setLoading] = useState(false);
+  const fetcher = useFetcher<{ success?: boolean; message?: string; error?: string }>();
+  const isLoading = fetcher.state !== "idle";
 
-  const handleEnable = async () => {
-    setLoading(true);
-    try {
-      const response = await fetch("/api/enable-widget", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          phone_number: phoneNumber,
-          default_message: defaultMessage,
-        }),
-      });
-
-      const data = await response.json();
-
-      if (data.success) {
-        onSuccess();
-      } else {
-        onError(data.error || "Une erreur est survenue");
-      }
-    } catch (error) {
-      onError("Erreur de connexion au serveur");
-    } finally {
-      setLoading(false);
+  useEffect(() => {
+    if (fetcher.data?.success) {
+      onSuccess();
+    } else if (fetcher.data?.error) {
+      onError(fetcher.data.error);
     }
-  };
+  }, [fetcher.data]);
 
   if (alreadyEnabled) {
     return (
@@ -577,8 +647,13 @@ function EnableWidgetButton({
   }
 
   return (
-    <Button primary onClick={handleEnable} loading={loading}>
-      Activer le widget automatiquement
-    </Button>
+    <fetcher.Form method="post">
+      <input type="hidden" name="actionType" value="enableWidget" />
+      <input type="hidden" name="phoneNumber" value={phoneNumber} />
+      <input type="hidden" name="defaultMessage" value={defaultMessage} />
+      <Button primary submit loading={isLoading}>
+        Activer le widget automatiquement
+      </Button>
+    </fetcher.Form>
   );
 }
