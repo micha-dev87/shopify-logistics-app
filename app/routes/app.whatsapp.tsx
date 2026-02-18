@@ -64,40 +64,44 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     },
   });
 
-  // Check if widget is already active on the store
+  // Check if widget is already active on the store via GraphQL
   let widgetActiveOnStore = false;
   try {
-    const themesResponse = await admin.rest.get({
-      path: "themes",
-    });
-    
-    const themes = themesResponse.body?.themes || [];
-    const mainTheme = themes.find((t: any) => t.role === "main");
-    
-    if (mainTheme) {
-      const settingsResponse = await admin.rest.get({
-        path: `themes/${mainTheme.id}/assets`,
-        query: {
-          "asset[key]": "config/settings_data.json",
-        },
-      });
-
-      if (settingsResponse.body?.asset?.value) {
-        const settingsData = JSON.parse(settingsResponse.body.asset.value);
-        const blocks = settingsData?.current?.blocks || {};
-        const extensionHandle = "whatsapp-widget";
-        const blockHandle = "widget";
-        
-        for (const block of Object.values(blocks)) {
-          const blockType = (block as any)?.type || "";
-          const disabled = (block as any)?.disabled !== false;
-          const settings = (block as any)?.settings || {};
-          
-          if ((blockType.includes(extensionHandle) || blockType.includes(blockHandle)) && 
-              !disabled && settings.enabled !== false) {
-            widgetActiveOnStore = true;
-            break;
+    const themeQuery = await admin.graphql(`{
+      themes(first: 10, roles: MAIN) {
+        nodes {
+          id
+          name
+          role
+          files(filenames: "config/settings_data.json", first: 1) {
+            nodes {
+              filename
+              body {
+                ... on OnlineStoreThemeFileBodyText {
+                  content
+                }
+              }
+            }
           }
+        }
+      }
+    }`);
+    const themeData = await themeQuery.json();
+    const mainTheme = themeData?.data?.themes?.nodes?.[0];
+    
+    if (mainTheme?.files?.nodes?.[0]?.body?.content) {
+      const settingsData = JSON.parse(mainTheme.files.nodes[0].body.content);
+      const blocks = settingsData?.current?.blocks || {};
+      
+      for (const block of Object.values(blocks)) {
+        const blockType = (block as any)?.type || "";
+        const disabled = (block as any)?.disabled !== false;
+        const settings = (block as any)?.settings || {};
+        
+        if ((blockType.includes("whatsapp-widget") || blockType.includes("widget")) && 
+            !disabled && settings.enabled !== false) {
+          widgetActiveOnStore = true;
+          break;
         }
       }
     }
@@ -158,27 +162,41 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const phoneNumber = formData.get("phoneNumber") as string || "";
         const defaultMessage = formData.get("defaultMessage") as string || "Bonjour, j'ai une question concernant ma livraison.";
 
-        // Step 1: Get the main theme ID
-        const themesResponse = await admin.rest.get({ path: "themes" });
-        const themes = themesResponse.body?.themes || [];
-        const mainTheme = themes.find((t: any) => t.role === "main");
+        // Step 1: Get the main theme and its settings_data.json via GraphQL
+        const themeQuery = await admin.graphql(`{
+          themes(first: 10, roles: MAIN) {
+            nodes {
+              id
+              name
+              role
+              files(filenames: "config/settings_data.json", first: 1) {
+                nodes {
+                  filename
+                  body {
+                    ... on OnlineStoreThemeFileBodyText {
+                      content
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }`);
+        const themeData = await themeQuery.json();
+        const mainTheme = themeData?.data?.themes?.nodes?.[0];
 
         if (!mainTheme) {
           return json({ error: "Aucun thème principal trouvé" }, { status: 404 });
         }
 
-        const themeId = mainTheme.id;
+        const themeGid = mainTheme.id; // format: gid://shopify/OnlineStoreTheme/123456
 
-        // Step 2: Get current settings_data.json
-        const settingsResponse = await admin.rest.get({
-          path: `themes/${themeId}/assets`,
-          query: { "asset[key]": "config/settings_data.json" },
-        });
-
+        // Step 2: Parse current settings_data.json
         let settingsData: any = {};
-        if (settingsResponse.body?.asset?.value) {
+        const fileContent = mainTheme?.files?.nodes?.[0]?.body?.content;
+        if (fileContent) {
           try {
-            settingsData = JSON.parse(settingsResponse.body.asset.value);
+            settingsData = JSON.parse(fileContent);
           } catch (e) {
             settingsData = { current: {} };
           }
@@ -225,16 +243,39 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           settingsData.current.block_order.push(blockId);
         }
 
-        // Step 5: Save updated settings_data.json
-        await admin.rest.put({
-          path: `themes/${themeId}/assets`,
-          data: {
-            asset: {
-              key: "config/settings_data.json",
-              value: JSON.stringify(settingsData, null, 2),
-            },
+        // Step 5: Save updated settings_data.json via GraphQL themeFilesUpsert
+        const updatedContent = JSON.stringify(settingsData, null, 2);
+        const upsertMutation = await admin.graphql(`
+          mutation themeFilesUpsert($id: ID!, $files: [OnlineStoreThemeFilesUpsertFileInput!]!) {
+            themeFilesUpsert(themeId: $id, files: $files) {
+              upsertedThemeFiles {
+                filename
+              }
+              userErrors {
+                field
+                message
+              }
+            }
+          }
+        `, {
+          variables: {
+            id: themeGid,
+            files: [{
+              filename: "config/settings_data.json",
+              body: {
+                type: "TEXT",
+                value: updatedContent,
+              },
+            }],
           },
         });
+
+        const upsertData = await upsertMutation.json();
+        const userErrors = upsertData?.data?.themeFilesUpsert?.userErrors || [];
+
+        if (userErrors.length > 0) {
+          return json({ error: `Erreur: ${userErrors.map((e: any) => e.message).join(", ")}` }, { status: 400 });
+        }
 
         return json({ success: true, message: "Widget WhatsApp activé avec succès sur votre boutique !" });
       }
