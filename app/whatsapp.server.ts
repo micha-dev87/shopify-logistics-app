@@ -131,8 +131,34 @@ async function getRateLimitInfo(shopId: string): Promise<RateLimitInfo> {
 }
 
 // ============================================================
-// AUTH STATE MANAGEMENT (Redis-based)
+// AUTH STATE MANAGEMENT (Prisma-based with Buffer serialization)
 // ============================================================
+
+// Buffer serialization helpers for Baileys credentials
+// Baileys stores Buffers which need special handling when serialized to JSON
+const BufferJSON = {
+  replacer: (key: string, value: any) => {
+    if (value?.type === 'Buffer') {
+      return { 
+        __buffer: true, 
+        data: Buffer.from(value.data).toString('base64') 
+      };
+    }
+    if (Buffer.isBuffer(value)) {
+      return { 
+        __buffer: true, 
+        data: value.toString('base64') 
+      };
+    }
+    return value;
+  },
+  reviver: (key: string, value: any) => {
+    if (value?.__buffer) {
+      return Buffer.from(value.data, 'base64');
+    }
+    return value;
+  }
+};
 
 async function getAuthState(shopId: string): Promise<{ creds: any; keys: any } | null> {
   const session = await prisma.whatsAppSession.findUnique({
@@ -143,23 +169,27 @@ async function getAuthState(shopId: string): Promise<{ creds: any; keys: any } |
     return null;
   }
   
-  return {
-    creds: session.creds,
-    keys: session.keys,
-  };
+  // Deserialize Buffers from JSON storage
+  const creds = JSON.parse(JSON.stringify(session.creds), BufferJSON.reviver);
+  const keys = session.keys || {};
+  
+  return { creds, keys };
 }
 
 async function saveAuthState(shopId: string, creds: any, keys: any): Promise<void> {
+  // Serialize Buffers for JSON storage
+  const serializedCreds = JSON.parse(JSON.stringify(creds, BufferJSON.replacer));
+  
   await prisma.whatsAppSession.upsert({
     where: { shopId },
     create: {
       shopId,
-      creds,
+      creds: serializedCreds,
       keys,
       connected: false,
     },
     update: {
-      creds,
+      creds: serializedCreds,
       keys,
       updatedAt: new Date(),
     },
@@ -329,13 +359,20 @@ class WhatsAppService {
         const data: Record<string, any> = {};
         for (const id of ids) {
           const key = `${type}-${id}`;
-          data[id] = keys[key] || null;
+          // Deserialize Buffers from storage
+          const stored = keys[key];
+          if (stored) {
+            data[id] = JSON.parse(JSON.stringify(stored), BufferJSON.reviver);
+          } else {
+            data[id] = null;
+          }
         }
         return data;
       },
       set: async (data: Record<string, any>) => {
         for (const [key, value] of Object.entries(data)) {
-          keys[key] = value;
+          // Serialize Buffers for storage
+          keys[key] = JSON.parse(JSON.stringify(value, BufferJSON.replacer));
         }
         await saveAuthState(this.shopId, authState!.creds, keys);
       },
