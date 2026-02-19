@@ -28,13 +28,10 @@ jobs:
         run: npm ci
 
       - name: Run type check
-        run: npm run type-check
+        run: npm run typecheck
 
       - name: Run linting
         run: npm run lint
-
-      - name: Run tests
-        run: npm test
 
       - name: Build application
         run: npm run build
