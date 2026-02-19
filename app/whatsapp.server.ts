@@ -282,10 +282,15 @@ class WhatsAppService {
    */
   private async createSocket(): Promise<void> {
     // Dynamic import for Baileys - handle CommonJS/ESM interop
-    // Baileys is CommonJS, so default contains the full module exports
     const baileysModule = await import("@whiskeysockets/baileys");
     const baileys = (baileysModule as any).default || baileysModule;
-    const { makeWASocket, DisconnectReason, useMultiFileAuthState } = baileys;
+    
+    // Get functions - handle nested default export
+    const makeWASocket = baileys.makeWASocket || baileys.default?.makeWASocket;
+    const DisconnectReason = baileys.DisconnectReason;
+    
+    console.log('[WhatsApp] makeWASocket:', typeof makeWASocket, makeWASocket ? 'function' : 'undefined');
+    console.log('[WhatsApp] DisconnectReason:', DisconnectReason);
     
     const authState = await getAuthState(this.shopId);
     
