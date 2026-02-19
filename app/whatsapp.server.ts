@@ -281,9 +281,10 @@ class WhatsAppService {
    * Create a new Baileys socket
    */
   private async createSocket(): Promise<void> {
-    // Dynamic import for Baileys (ESM only)
-    const { default: makeWASocket, DisconnectReason, useMultiFileAuthState } = 
-      await import("@whiskeysockets/baileys");
+    // Dynamic import for Baileys - handle CommonJS/ESM interop
+    const baileys = await import("@whiskeysockets/baileys");
+    const makeWASocket = (baileys as any).default || (baileys as any).makeWASocket;
+    const { DisconnectReason } = baileys as any;
     
     const authState = await getAuthState(this.shopId);
     
