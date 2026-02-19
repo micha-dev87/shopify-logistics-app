@@ -288,37 +288,70 @@ class WhatsAppService {
     // Get functions - handle nested default export
     const makeWASocket = baileys.makeWASocket || baileys.default?.makeWASocket;
     const DisconnectReason = baileys.DisconnectReason;
+    const initAuthCreds = baileys.initAuthCreds || baileys.default?.initAuthCreds;
+    const makeCacheableSignalKeyStore = baileys.makeCacheableSignalKeyStore || baileys.default?.makeCacheableSignalKeyStore;
     
     console.log('[WhatsApp] makeWASocket:', typeof makeWASocket, makeWASocket ? 'function' : 'undefined');
     console.log('[WhatsApp] DisconnectReason:', DisconnectReason);
+    console.log('[WhatsApp] initAuthCreds:', typeof initAuthCreds);
+    console.log('[WhatsApp] makeCacheableSignalKeyStore:', typeof makeCacheableSignalKeyStore);
     
-    const authState = await getAuthState(this.shopId);
+    // Get existing auth state or create new one
+    let authState = await getAuthState(this.shopId);
+    
+    // If no existing session, initialize new credentials
+    if (!authState || !authState.creds || Object.keys(authState.creds).length === 0) {
+      console.log('[WhatsApp] No existing session, creating new credentials');
+      authState = {
+        creds: initAuthCreds(),
+        keys: {},
+      };
+      // Save initial empty state
+      await saveAuthState(this.shopId, authState.creds, authState.keys);
+    }
+    
+    // Create a simple logger for Baileys
+    const logger = {
+      level: 'silent' as const,
+      fatal: () => {},
+      error: (...args: any[]) => console.error('[Baileys]', ...args),
+      warn: (...args: any[]) => console.warn('[Baileys]', ...args),
+      info: () => {},
+      debug: () => {},
+      trace: () => {},
+      child: () => logger,
+    };
+    
+    // Create signal key store backed by our Prisma storage
+    const keys = authState.keys || {};
+    const signalKeyStore = makeCacheableSignalKeyStore({
+      get: async (type: string, ids: string[]) => {
+        const data: Record<string, any> = {};
+        for (const id of ids) {
+          const key = `${type}-${id}`;
+          data[id] = keys[key] || null;
+        }
+        return data;
+      },
+      set: async (data: Record<string, any>) => {
+        for (const [key, value] of Object.entries(data)) {
+          keys[key] = value;
+        }
+        await saveAuthState(this.shopId, authState!.creds, keys);
+      },
+    }, logger);
     
     // Create socket
     this.socket = makeWASocket({
-      auth: authState ? {
+      auth: {
         creds: authState.creds,
-        keys: {
-          get: async (type: string, ids: string[]) => {
-            const data: Record<string, any> = {};
-            for (const id of ids) {
-              data[id] = authState.keys[`${type}-${id}`] || null;
-            }
-            return data;
-          },
-          set: async (data: Record<string, any>) => {
-            const keys = authState.keys || {};
-            for (const [key, value] of Object.entries(data)) {
-              keys[key] = value;
-            }
-            await saveAuthState(this.shopId, authState.creds, keys);
-          },
-        },
-      } : undefined,
+        keys: signalKeyStore,
+      },
       printQRInTerminal: false,
       browser: ["Shopify Logistics", "Chrome", "1.0.0"],
       connectTimeoutMs: 60000,
       keepAliveIntervalMs: 25000,
+      logger,
     });
     
     activeSockets.set(this.shopId, this.socket);
