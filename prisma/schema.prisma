@@ -57,11 +57,22 @@ model Shop {
   whatsappMessage  String?  // Default message for widget
   widgetEnabled    Boolean  @default(true)
   
+  // WhatsApp notification configuration (Baileys)
+  notificationMode    NotificationMode @default(TELEGRAM)  // TELEGRAM, WHATSAPP, BOTH
+  whatsappEnabled     Boolean  @default(false)
+  whatsappConnectedAt DateTime?
+  whatsappPhone       String?  // Phone number of connected WhatsApp account
+  
+  // Rate limiting tracking
+  whatsappDailyCount  Int      @default(0)
+  whatsappCountDate   DateTime?  // Date of last count reset
+  
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  deliveryAgents DeliveryAgent[]
-  deliveryBills  DeliveryBill[]
+  deliveryAgents  DeliveryAgent[]
+  deliveryBills   DeliveryBill[]
+  whatsappSession WhatsAppSession?
 
   @@index([domain])
 }
@@ -75,6 +86,7 @@ model DeliveryAgent {
   city           String?
   role           AgentRole @default(COURIER)
   telegramUserId String?   // Telegram user ID for bot notifications
+  whatsappJid    String?   // WhatsApp JID for notifications (e.g., "22507070707@s.whatsapp.net")
   isActive       Boolean   @default(true)
   showInWidget   Boolean   @default(false) // Whether this agent appears in the WhatsApp widget
   createdAt      DateTime  @default(now())
@@ -85,6 +97,24 @@ model DeliveryAgent {
 
   @@index([shopId, country, city, isActive])
   @@index([shopId, isActive])
+}
+
+// WhatsApp session for Baileys authentication persistence
+model WhatsAppSession {
+  id           String   @id @default(cuid())
+  shopId       String   @unique
+  creds        Json     // Baileys credentials (encrypted)
+  keys         Json     // Signal protocol keys
+  connected    Boolean  @default(false)
+  phoneNumber  String?  // Connected WhatsApp phone number
+  lastQr       String?  // Last generated QR code (temporary)
+  qrExpiry     DateTime? // QR code expiration time
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@index([shopId])
 }
 
 model DeliveryBill {
@@ -138,4 +168,10 @@ enum DeliveryStatus {
   DELIVERED     // Successfully delivered
   NOT_DELIVERED // Delivery failed
   CANCELLED     // Order cancelled
+}
+
+enum NotificationMode {
+  TELEGRAM   // Telegram only
+  WHATSAPP   // WhatsApp only
+  BOTH       // Telegram first, WhatsApp as backup
 }

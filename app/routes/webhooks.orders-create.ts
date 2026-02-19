@@ -3,6 +3,7 @@ import { json } from "@remix-run/node";
 import crypto from "crypto";
 import prisma from "../db.server";
 import { notifyAgentOfDelivery } from "../telegram.server";
+import { notifyAgentViaWhatsApp } from "../whatsapp.server";
 
 // ============================================================
 // SHOPIFY WEBHOOK: orders/create
@@ -250,58 +251,114 @@ async function assignBestAgent(
       activeBillsCount: selectedAgent._count.deliveryBills,
     });
 
-    // Trigger Telegram notification if agent has Telegram configured
-    if (selectedAgent.telegramUserId) {
-      try {
-        // Fetch agent with shop relation for notification
-        const agentWithShop = await prisma.deliveryAgent.findUnique({
-          where: { id: selectedAgent.id },
-          include: { shop: true },
-        });
+    // Send notification based on shop's notification mode
+    // Priority: Telegram first, WhatsApp as backup (if BOTH mode)
+    try {
+      // Fetch agent with shop relation for notification
+      const agentWithShop = await prisma.deliveryAgent.findUnique({
+        where: { id: selectedAgent.id },
+        include: { shop: true },
+      });
 
-        if (agentWithShop?.shop.telegramBotToken) {
-          const updatedBill = await prisma.deliveryBill.findUnique({
+      if (!agentWithShop) {
+        console.log("[Attribution] Agent not found for notification", { agentId: selectedAgent.id });
+        return;
+      }
+
+      const updatedBill = await prisma.deliveryBill.findUnique({
+        where: { id: billId },
+      });
+
+      if (!updatedBill) {
+        console.log("[Attribution] Bill not found for notification", { billId });
+        return;
+      }
+
+      const shop = agentWithShop.shop;
+      const notificationMode = shop.notificationMode || "TELEGRAM";
+      
+      let notificationSent = false;
+      let usedPlatform = "";
+
+      // TELEGRAM or BOTH: Try Telegram first
+      if ((notificationMode === "TELEGRAM" || notificationMode === "BOTH") && 
+          selectedAgent.telegramUserId && shop.telegramBotToken) {
+        const notifResult = await notifyAgentOfDelivery(
+          agentWithShop as any,
+          updatedBill,
+          shop.telegramBotToken,
+        );
+
+        if (notifResult.success) {
+          await prisma.deliveryBill.update({
             where: { id: billId },
+            data: {
+              telegramNotified: true,
+              telegramMessageId: notifResult.messageId?.toString() || null,
+            },
           });
 
-          if (updatedBill) {
-            const notifResult = await notifyAgentOfDelivery(
-              agentWithShop as any,
-              updatedBill,
-              agentWithShop.shop.telegramBotToken,
-            );
-
-            if (notifResult.success) {
-              await prisma.deliveryBill.update({
-                where: { id: billId },
-                data: {
-                  telegramNotified: true,
-                  telegramMessageId: notifResult.messageId?.toString() || null,
-                },
-              });
-
-              console.log("[Attribution] Telegram notification sent", {
-                billId,
-                agentId: selectedAgent.id,
-                messageId: notifResult.messageId,
-              });
-            } else {
-              console.error("[Attribution] Telegram notification failed", {
-                billId,
-                agentId: selectedAgent.id,
-                error: notifResult.error,
-              });
-            }
-          }
+          notificationSent = true;
+          usedPlatform = "Telegram";
+          
+          console.log("[Attribution] Telegram notification sent", {
+            billId,
+            agentId: selectedAgent.id,
+            messageId: notifResult.messageId,
+          });
         } else {
-          console.log("[Attribution] No Telegram bot token configured for shop", {
-            shopId,
+          console.error("[Attribution] Telegram notification failed", {
+            billId,
+            agentId: selectedAgent.id,
+            error: notifResult.error,
           });
         }
-      } catch (notifError) {
-        // Don't fail the attribution if notification fails
-        console.error("[Attribution] Error sending Telegram notification:", notifError);
       }
+
+      // WHATSAPP or BOTH (as backup): Try WhatsApp if Telegram failed or mode is WHATSAPP only
+      if (!notificationSent && 
+          (notificationMode === "WHATSAPP" || notificationMode === "BOTH") &&
+          selectedAgent.whatsappJid && shop.whatsappEnabled) {
+        const notifResult = await notifyAgentViaWhatsApp(
+          agentWithShop as any,
+          updatedBill,
+        );
+
+        if (notifResult.success) {
+          notificationSent = true;
+          usedPlatform = "WhatsApp";
+          
+          console.log("[Attribution] WhatsApp notification sent", {
+            billId,
+            agentId: selectedAgent.id,
+            messageId: notifResult.messageId,
+          });
+        } else {
+          console.error("[Attribution] WhatsApp notification failed", {
+            billId,
+            agentId: selectedAgent.id,
+            error: notifResult.error,
+          });
+        }
+      }
+
+      if (notificationSent) {
+        console.log("[Attribution] Notification sent successfully via", {
+          billId,
+          platform: usedPlatform,
+        });
+      } else {
+        console.log("[Attribution] No notification sent - no platform available", {
+          billId,
+          agentId: selectedAgent.id,
+          hasTelegram: !!selectedAgent.telegramUserId,
+          hasWhatsApp: !!selectedAgent.whatsappJid,
+          notificationMode,
+        });
+      }
+    } catch (notifError) {
+      // Don't fail the attribution if notification fails
+      console.error("[Attribution] Error sending notification:", notifError);
     }
   } catch (error) {
     console.error("[Attribution] Error in assignment algorithm:", error);

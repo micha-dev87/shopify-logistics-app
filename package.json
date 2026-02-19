@@ -16,7 +16,7 @@
     "typecheck": "tsc --noEmit"
   },
   "type": "module",
-  "dependencies": {
+"dependencies": {
     "@prisma/client": "^5.22.0",
     "@remix-run/fs-routes": "^2.15.0",
     "@remix-run/node": "^2.15.0",
@@ -26,17 +26,22 @@
     "@shopify/polaris": "^13.9.5",
     "@shopify/shopify-app-remix": "^3.6.0",
     "@shopify/shopify-app-session-storage-prisma": "^5.1.2",
+    "@whiskeysockets/baileys": "^6.17.0",
+    "ioredis": "^5.4.0",
     "isbot": "^5.1.17",
+    "pino": "^9.0.0",
+    "qrcode": "^1.5.3",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "vite": "^5.4.11",
     "@vitejs/plugin-react": "^4.3.4"
   },
-  "devDependencies": {
+"devDependencies": {
     "@remix-run/dev": "^2.15.0",
     "@remix-run/eslint-config": "^2.15.0",
     "@shopify/cli": "~3.70.0",
     "@types/eslint": "^9.6.0",
+    "@types/qrcode": "^1.5.5",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "eslint": "^8.57.1",
