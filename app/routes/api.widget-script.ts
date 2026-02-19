@@ -455,8 +455,19 @@ function generateMultiStepWidget(
       });
       
       // [M2] Click outside — store ref for potential cleanup
+      // Uses composedPath() because clearChildren() removes clicked elements from DOM
+      // before this handler runs, causing widget.contains(e.target) to return false
       outsideClickHandler = function(e) {
-        if (!widget.contains(e.target)) {
+        var isInside = false;
+        if (e.composedPath) {
+          var evtPath = e.composedPath();
+          for (var k = 0; k < evtPath.length; k++) {
+            if (evtPath[k] === widget) { isInside = true; break; }
+          }
+        } else {
+          isInside = widget.contains(e.target);
+        }
+        if (!isInside) {
           closePanel();
         }
       };
