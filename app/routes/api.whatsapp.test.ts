@@ -53,19 +53,28 @@ export async function loader({ request }: LoaderFunctionArgs) {
         }
       );
       
-      // Wait for QR with timeout (up to 30 seconds)
+      // Wait for QR OR direct reconnection (up to 30 seconds)
       let attempts = 0;
       const maxAttempts = 30;
       
       while (!qrCodeData && attempts < maxAttempts) {
         await new Promise(resolve => setTimeout(resolve, 1000));
         
-        // Check if QR is available in database
+        // Check if QR is available OR already reconnected
         const status = await getWhatsAppStatus(TEST_SHOP_ID);
         if (status.qrCode) {
           qrCodeData = status.qrCode;
           connectionStatus = status;
           break;
+        }
+        if (status.connected) {
+          // Already reconnected with existing credentials (no QR needed)
+          return json({
+            success: true,
+            message: "Reconnected with existing credentials",
+            connected: true,
+            phoneNumber: status.phoneNumber,
+          });
         }
         
         attempts++;

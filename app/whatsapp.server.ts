@@ -526,12 +526,26 @@ class WhatsAppService {
     jid: string,
     text: string
   ): Promise<{ success: boolean; messageId?: string; error?: string }> {
+    // Try to get socket from memory first
     if (!this.socket) {
       this.socket = activeSockets.get(this.shopId);
+    }
+    
+    // Auto-reconnect if socket is unavailable but session exists in DB
+    if (!this.socket) {
+      console.log('[WhatsApp] Socket unavailable, attempting auto-reconnect...');
+      await this.connect(() => {}, () => {});
+      // Wait up to 15s for reconnection
+      for (let i = 0; i < 15; i++) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        this.socket = activeSockets.get(this.shopId);
+        if (this.socket) break;
+      }
       if (!this.socket) {
-        return { success: false, error: "WhatsApp not connected" };
+        return { success: false, error: "WhatsApp not connected - please scan QR code again" };
       }
     }
+    
     try {
       const result = await this.socket.sendMessage(jid, { text });
       return { success: true, messageId: result?.key?.id };
