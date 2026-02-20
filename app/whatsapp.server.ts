@@ -434,15 +434,15 @@ class WhatsAppService {
       await saveAuthState(this.shopId, authState.creds, authState.keys);
     }
     
-    // Create a simple logger for Baileys
+    // Create a simple logger for Baileys - enable debug for troubleshooting
     const logger = {
-      level: 'silent' as const,
-      fatal: () => {},
-      error: (...args: any[]) => console.error('[Baileys]', ...args),
-      warn: (...args: any[]) => console.warn('[Baileys]', ...args),
-      info: () => {},
-      debug: () => {},
-      trace: () => {},
+      level: 'debug' as const,
+      fatal: (...args: any[]) => console.error('[Baileys FATAL]', ...args),
+      error: (...args: any[]) => console.error('[Baileys ERROR]', ...args),
+      warn: (...args: any[]) => console.warn('[Baileys WARN]', ...args),
+      info: (...args: any[]) => console.log('[Baileys INFO]', ...args),
+      debug: (...args: any[]) => console.log('[Baileys DEBUG]', ...args),
+      trace: (...args: any[]) => console.log('[Baileys TRACE]', ...args),
       child: () => logger,
     };
     
@@ -493,7 +493,10 @@ class WhatsAppService {
       const statusCallback = statusCallbacks.get(this.shopId);
       const qrCallback = qrCallbacks.get(this.shopId);
       
+      console.log('[WhatsApp] Connection update:', JSON.stringify({ connection, hasQr: !!qr, lastDisconnect }));
+      
       if (qr) {
+        console.log('[WhatsApp] QR code received, length:', qr.length);
         // Save and emit QR code
         await saveQRCode(this.shopId, qr);
         if (qrCallback) {
@@ -509,6 +512,7 @@ class WhatsAppService {
       }
       
       if (connection === "open") {
+        console.log('[WhatsApp] Connection opened!');
         const phoneNumber = this.socket.user?.id?.split("@")[0] || "Unknown";
         await setConnected(this.shopId, phoneNumber);
         await clearQRCode(this.shopId);
@@ -522,6 +526,7 @@ class WhatsAppService {
       }
       
       if (connection === "close") {
+        console.log('[WhatsApp] Connection closed:', JSON.stringify(lastDisconnect));
         const statusCode = lastDisconnect?.error?.output?.statusCode;
         const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
         
