@@ -73,7 +73,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 <!DOCTYPE html>
 <html>
 <head>
-  <title>WhatsApp QR Code</title>
+  <title>WhatsApp Connection</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
     body { font-family: Arial, sans-serif; text-align: center; padding: 20px; background: #f5f5f5; }
@@ -87,11 +87,35 @@ export async function loader({ request }: LoaderFunctionArgs) {
     .refresh-btn { margin-top: 15px; padding: 10px 20px; background: #25D366; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 16px; }
     .refresh-btn:hover { background: #128C7E; }
     .expiry { color: #666; font-size: 14px; margin-top: 10px; }
+    .alternative { margin-top: 30px; padding-top: 20px; border-top: 2px dashed #ddd; }
+    .phone-input { 
+      width: 100%; 
+      padding: 12px; 
+      margin: 10px 0; 
+      border: 2px solid #ddd; 
+      border-radius: 5px; 
+      font-size: 16px;
+      box-sizing: border-box;
+    }
+    .phone-input:focus { border-color: #25D366; outline: none; }
+    .pairing-result { 
+      margin-top: 15px; 
+      padding: 15px; 
+      background: #e7f3ff; 
+      border-radius: 5px; 
+      font-family: monospace; 
+      font-size: 24px;
+      letter-spacing: 4px;
+    }
+    .instructions { text-align: left; margin-top: 15px; font-size: 14px; color: #555; }
+    .instructions li { margin: 5px 0; }
   </style>
 </head>
 <body>
   <div class="container">
-    <h1>📱 WhatsApp QR Code</h1>
+    <h1>📱 WhatsApp Connection</h1>
+    
+    <!-- QR Code Section -->
     <div class="qr-container">
       ${status.qrCode ? `<img src="?action=qr-image&token=test-whatsapp-2024&t=${Date.now()}" alt="QR Code" style="width:256px;height:256px;">` : '<p>Aucun QR disponible</p>'}
     </div>
@@ -101,10 +125,55 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ${status.qrExpiry ? `<div class="expiry">Expire: ${new Date(status.qrExpiry).toLocaleTimeString('fr-FR')}</div>` : ''}
     <button class="refresh-btn" onclick="location.reload()">🔄 Rafraîchir</button>
     <button class="refresh-btn" style="background:#007bff" onclick="fetch('?action=connect&token=test-whatsapp-2024').then(()=>location.reload())">🆕 Nouveau QR</button>
+    
+    <!-- Alternative: Pairing Code -->
+    <div class="alternative">
+      <h2>🔢 Ou utilisez le Code</h2>
+      <p style="color: #666; font-size: 14px;">Si le QR ne fonctionne pas, entrez votre numéro pour recevoir un code :</p>
+      <input type="tel" id="phoneInput" class="phone-input" placeholder="33612345678 (sans +)" maxlength="15">
+      <button class="refresh-btn" style="background:#ff6b6b" onclick="requestPairingCode()">📲 Obtenir le Code</button>
+      <div id="pairingResult"></div>
+    </div>
   </div>
+  
   <script>
     // Auto-refresh every 5 seconds if not connected
     ${!status.connected ? 'setTimeout(() => location.reload(), 5000);' : ''}
+    
+    async function requestPairingCode() {
+      const phone = document.getElementById('phoneInput').value.replace(/\D/g, '');
+      const resultDiv = document.getElementById('pairingResult');
+      
+      if (phone.length < 10) {
+        resultDiv.innerHTML = '<p style="color: red;">Numéro invalide (min 10 chiffres)</p>';
+        return;
+      }
+      
+      resultDiv.innerHTML = '<p>⏳ Génération du code...</p>';
+      
+      try {
+        const response = await fetch('/api/whatsapp/pairing?action=pairing-code&phone=' + phone + '&token=test-whatsapp-2024');
+        const data = await response.json();
+        
+        if (data.success) {
+          resultDiv.innerHTML = \`
+            <div class="pairing-result">\${data.pairingCode}</div>
+            <ol class="instructions">
+              <li>Ouvrez WhatsApp sur votre téléphone</li>
+              <li>Allez dans Paramètres → Appareils connectés</li>
+              <li>Appuyez sur "Connecter un appareil"</li>
+              <li>Appuyez sur "Se connecter avec un numéro"</li>
+              <li>Entrez ce code: <strong>\${data.pairingCode}</strong></li>
+              <li>Attendez la connexion...</li>
+            </ol>
+          \`;
+        } else {
+          resultDiv.innerHTML = '<p style="color: red;">❌ ' + (data.error || 'Erreur') + '</p>';
+        }
+      } catch (error) {
+        resultDiv.innerHTML = '<p style="color: red;">❌ Erreur réseau</p>';
+      }
+    }
   </script>
 </body>
 </html>`;

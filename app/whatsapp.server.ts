@@ -37,6 +37,7 @@ interface ConnectionStatus {
   phoneNumber?: string;
   qrCode?: string;
   qrExpiry?: Date;
+  pairingCode?: string;
   error?: string;
 }
 
@@ -709,6 +710,50 @@ class WhatsAppService {
     return { connected: false };
   }
   
+  /**
+   * Request pairing code for phone number linking
+   * This is an alternative to QR code scanning
+   * Phone number must be in E.164 format without + (e.g., "33612345678")
+   */
+  async requestPairingCode(phoneNumber: string): Promise<string | null> {
+    if (!this.socket) {
+      console.log('[WhatsApp] No socket available, creating one first...');
+      await this.connect(() => {}, () => {});
+      // Wait a bit for connection to establish
+      await new Promise(resolve => setTimeout(resolve, 3000));
+    }
+    
+    if (!this.socket) {
+      console.error('[WhatsApp] Failed to create socket');
+      return null;
+    }
+    
+    try {
+      console.log('[WhatsApp] Requesting pairing code for:', phoneNumber);
+      const code = await this.socket.requestPairingCode(phoneNumber);
+      console.log('[WhatsApp] Pairing code received:', code);
+      
+      // Store the pairing code in the session
+      await prisma.whatsAppSession.upsert({
+        where: { shopId: this.shopId },
+        create: {
+          shopId: this.shopId,
+          creds: {},
+          keys: {},
+          connected: false,
+        },
+        update: {
+          connected: false,
+        },
+      });
+      
+      return code;
+    } catch (error) {
+      console.error('[WhatsApp] Failed to get pairing code:', error);
+      return null;
+    }
+  }
+  
   // ============================================================
   // PRIVATE HELPERS
   // ============================================================
@@ -911,6 +956,19 @@ export async function initWhatsAppConnection(
 ): Promise<void> {
   const service = createWhatsAppService(shopId);
   return service.connect(onQr, onStatusChange);
+}
+
+/**
+ * Request pairing code for WhatsApp connection
+ * Alternative to QR code - user enters code in WhatsApp app
+ * Phone number must be in E.164 format without + (e.g., "33612345678")
+ */
+export async function requestWhatsAppPairingCode(
+  shopId: string,
+  phoneNumber: string
+): Promise<string | null> {
+  const service = createWhatsAppService(shopId);
+  return service.requestPairingCode(phoneNumber);
 }
 
 /**
