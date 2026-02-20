@@ -434,8 +434,8 @@ class WhatsAppService {
         creds: initAuthCreds(),
         keys: {},
       };
-      // Save initial empty state
-      await saveAuthState(this.shopId, authState.creds, authState.keys);
+      // Don't save initial empty state - wait for creds.update from Baileys
+      // This ensures we only save valid credentials
     }
     
     // Create a simple logger for Baileys - enable debug for troubleshooting
