@@ -512,17 +512,23 @@ class WhatsAppService {
       
       if (qr) {
         console.log('[WhatsApp] QR code received, length:', qr.length);
+        console.log('[WhatsApp] QR raw content (first 100 chars):', qr.substring(0, 100));
         
-        // Generate QR data URL directly using qrcode library
-        // Baileys QR is already a text string with base64 segments - pass it directly
+        // Generate QR data URL using qrcode library with high error correction
+        // This ensures the QR is readable even if partially obscured
         const qrDataUrl = await QRCode.toDataURL(qr, {
-          width: 256,
-          margin: 2,
-          color: { dark: "#000000", light: "#ffffff" },
+          type: 'image/png',
+          width: 512, // Larger size for better scanning
+          margin: 4,  // More margin for better scanning
+          errorCorrectionLevel: 'H', // High error correction
+          color: { 
+            dark: "#000000", 
+            light: "#ffffff",
+          },
         });
         console.log('[WhatsApp] QR data URL generated, length:', qrDataUrl.length);
         
-        // Save and emit QR code as data URL (data:image/png;base64,...)
+        // Save the QR data URL for immediate use
         await saveQRCode(this.shopId, qrDataUrl);
         if (qrCallback) {
           qrCallback(qrDataUrl);
