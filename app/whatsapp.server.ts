@@ -137,28 +137,122 @@ async function getRateLimitInfo(shopId: string): Promise<RateLimitInfo> {
 // Buffer serialization helpers for Baileys credentials
 // Baileys stores Buffers which need special handling when serialized to JSON
 const BufferJSON = {
-  replacer: (key: string, value: any) => {
-    if (value?.type === 'Buffer') {
-      return { 
-        __buffer: true, 
-        data: Buffer.from(value.data).toString('base64') 
-      };
+  replacer: (_key: string, value: any) => {
+    // Handle standard Buffer toJSON format
+    if (value?.type === 'Buffer' && Array.isArray(value.data)) {
+      return Buffer.from(value.data).toString('base64');
     }
+    // Handle actual Buffer instances
     if (Buffer.isBuffer(value)) {
-      return { 
-        __buffer: true, 
-        data: value.toString('base64') 
-      };
+      return value.toString('base64');
     }
     return value;
   },
-  reviver: (key: string, value: any) => {
-    if (value?.__buffer) {
-      return Buffer.from(value.data, 'base64');
+  reviver: (_key: string, value: any) => {
+    // Revive base64 strings back to Buffers for known buffer fields
+    if (typeof value === 'string' && _key && (
+      _key === 'private' || 
+      _key === 'public' || 
+      _key === 'key' ||
+      _key === 'noiseKey' ||
+      _key === 'signedIdentityKey' ||
+      _key === 'signedPreKey' ||
+      _key === 'advSecretKey' ||
+      _key.includes('Key') ||
+      _key.includes('private') ||
+      _key.includes('public')
+    )) {
+      // Try to decode as base64 if it looks like base64
+      if (/^[A-Za-z0-9+/=]+$/.test(value) && value.length > 20) {
+        try {
+          return Buffer.from(value, 'base64');
+        } catch {
+          return value;
+        }
+      }
+    }
+    // Handle nested objects that might contain buffers
+    if (value && typeof value === 'object') {
+      // Handle { private: "...", public: "..." } key pairs
+      if (value.private && typeof value.private === 'string') {
+        try {
+          value.private = Buffer.from(value.private, 'base64');
+        } catch {}
+      }
+      if (value.public && typeof value.public === 'string') {
+        try {
+          value.public = Buffer.from(value.public, 'base64');
+        } catch {}
+      }
+      // Handle { key: "..." } for preKeys
+      if (value.key && typeof value.key === 'string') {
+        try {
+          value.key = Buffer.from(value.key, 'base64');
+        } catch {}
+      }
     }
     return value;
   }
 };
+
+// Deeply convert all Buffers in an object to base64 strings
+function serializeBuffers(obj: any): any {
+  if (Buffer.isBuffer(obj)) {
+    return obj.toString('base64');
+  }
+  if (obj && typeof obj === 'object') {
+    if (Array.isArray(obj)) {
+      return obj.map(serializeBuffers);
+    }
+    const result: any = {};
+    for (const [key, value] of Object.entries(obj)) {
+      result[key] = serializeBuffers(value);
+    }
+    return result;
+  }
+  return obj;
+}
+
+// Deeply convert base64 strings back to Buffers in credential structures
+function deserializeBuffers(obj: any): any {
+  if (!obj || typeof obj !== 'object') {
+    return obj;
+  }
+  if (Array.isArray(obj)) {
+    return obj.map(deserializeBuffers);
+  }
+  
+  const result: any = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (value && typeof value === 'object') {
+      // Check for key pair structure { private: "...", public: "..." }
+      if ('private' in value || 'public' in value) {
+        result[key] = {
+          private: typeof value.private === 'string' && value.private.length > 20 
+            ? Buffer.from(value.private, 'base64') 
+            : value.private,
+          public: typeof value.public === 'string' && value.public.length > 10
+            ? Buffer.from(value.public, 'base64')
+            : value.public,
+        };
+      } else if ('key' in value && typeof value.key === 'string') {
+        // PreKey structure { key: "...", keyId: ... }
+        result[key] = {
+          ...value,
+          key: Buffer.from(value.key, 'base64'),
+        };
+      } else {
+        result[key] = deserializeBuffers(value);
+      }
+    } else if (typeof value === 'string' && key.toLowerCase().includes('secret') && value.length > 20) {
+      // Handle secret keys like advSecretKey
+      result[key] = Buffer.from(value, 'base64');
+    } else {
+      result[key] = value;
+    }
+  }
+  return result;
+}
 
 async function getAuthState(shopId: string): Promise<{ creds: any; keys: any } | null> {
   const session = await prisma.whatsAppSession.findUnique({
@@ -170,7 +264,7 @@ async function getAuthState(shopId: string): Promise<{ creds: any; keys: any } |
   }
   
   // Deserialize Buffers from JSON storage
-  const creds = JSON.parse(JSON.stringify(session.creds), BufferJSON.reviver);
+  const creds = deserializeBuffers(session.creds);
   const keys = session.keys || {};
   
   return { creds, keys };
@@ -178,7 +272,7 @@ async function getAuthState(shopId: string): Promise<{ creds: any; keys: any } |
 
 async function saveAuthState(shopId: string, creds: any, keys: any): Promise<void> {
   // Serialize Buffers for JSON storage
-  const serializedCreds = JSON.parse(JSON.stringify(creds, BufferJSON.replacer));
+  const serializedCreds = serializeBuffers(creds);
   
   await prisma.whatsAppSession.upsert({
     where: { shopId },
@@ -362,7 +456,7 @@ class WhatsAppService {
           // Deserialize Buffers from storage
           const stored = keys[key];
           if (stored) {
-            data[id] = JSON.parse(JSON.stringify(stored), BufferJSON.reviver);
+            data[id] = deserializeBuffers(stored);
           } else {
             data[id] = null;
           }
@@ -372,7 +466,7 @@ class WhatsAppService {
       set: async (data: Record<string, any>) => {
         for (const [key, value] of Object.entries(data)) {
           // Serialize Buffers for storage
-          keys[key] = JSON.parse(JSON.stringify(value, BufferJSON.replacer));
+          keys[key] = serializeBuffers(value);
         }
         await saveAuthState(this.shopId, authState!.creds, keys);
       },
