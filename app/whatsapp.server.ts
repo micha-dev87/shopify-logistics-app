@@ -475,9 +475,9 @@ class WhatsAppService {
     }, logger);
     
     // Create socket with proper WhatsApp version and browser fingerprint
-    // Use a more recent/stable WhatsApp version
-    const waVersion: [number, number, number] = [2, 2413, 1];
-    const browserConfig = Browsers ? Browsers.ubuntu('Chrome') : ["Ubuntu", "Chrome", "120.0.0"];
+    // Version [2, 3000, 1028401180] with macOS Chrome works for QR generation
+    const waVersion: [number, number, number] = [2, 3000, 1028401180];
+    const browserConfig = Browsers ? Browsers.macOS('Chrome') : ["Mac OS", "Chrome", "120.0.0"];
     
     console.log('[WhatsApp] Using WhatsApp version:', waVersion);
     console.log('[WhatsApp] Using browser:', browserConfig);
@@ -492,7 +492,6 @@ class WhatsAppService {
       version: waVersion,
       connectTimeoutMs: 120000,
       keepAliveIntervalMs: 25000,
-      qrTimeout: 120000,  // 2 minutes to scan QR
       logger,
       markOnlineOnConnect: false,
     });
