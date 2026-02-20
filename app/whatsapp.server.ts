@@ -508,15 +508,19 @@ class WhatsAppService {
       
       if (qr) {
         console.log('[WhatsApp] QR code received, length:', qr.length);
+        // Encode QR as base64 to preserve binary characters
+        const qrBase64 = Buffer.from(qr, 'utf-8').toString('base64');
+        console.log('[WhatsApp] QR base64 length:', qrBase64.length);
+        
         // Save and emit QR code
-        await saveQRCode(this.shopId, qr);
+        await saveQRCode(this.shopId, qrBase64);
         if (qrCallback) {
-          qrCallback(qr);
+          qrCallback(qrBase64);
         }
         if (statusCallback) {
           statusCallback({
             connected: false,
-            qrCode: qr,
+            qrCode: qrBase64,
             qrExpiry: new Date(Date.now() + 60000),
           });
         }

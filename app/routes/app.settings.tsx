@@ -322,7 +322,9 @@ export default function SettingsPage() {
   const generateQRCodeImage = async (qrData: string) => {
     try {
       const QRCode = (await import("qrcode")).default;
-      const url = await QRCode.toDataURL(qrData, {
+      // Decode base64 QR code back to original format
+      const qrRaw = atob(qrData);
+      const url = await QRCode.toDataURL(qrRaw, {
         width: 256,
         margin: 2,
         color: { dark: "#000000", light: "#ffffff" },

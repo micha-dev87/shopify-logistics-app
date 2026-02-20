@@ -52,7 +52,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
         return new Response("No QR code available. Call ?action=connect first", { status: 404 });
       }
       
-      const qrDataUrl = await QRCode.toDataURL(status.qrCode, {
+      // Decode base64 QR code back to original format
+      const qrRaw = Buffer.from(status.qrCode, 'base64').toString('utf-8');
+      
+      const qrDataUrl = await QRCode.toDataURL(qrRaw, {
         width: 300,
         margin: 2,
         color: { dark: "#000000", light: "#ffffff" },
