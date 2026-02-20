@@ -414,11 +414,13 @@ class WhatsAppService {
     const DisconnectReason = baileys.DisconnectReason;
     const initAuthCreds = baileys.initAuthCreds || baileys.default?.initAuthCreds;
     const makeCacheableSignalKeyStore = baileys.makeCacheableSignalKeyStore || baileys.default?.makeCacheableSignalKeyStore;
+    const Browsers = baileys.Browsers || baileys.default?.Browsers;
     
     console.log('[WhatsApp] makeWASocket:', typeof makeWASocket, makeWASocket ? 'function' : 'undefined');
     console.log('[WhatsApp] DisconnectReason:', DisconnectReason);
     console.log('[WhatsApp] initAuthCreds:', typeof initAuthCreds);
     console.log('[WhatsApp] makeCacheableSignalKeyStore:', typeof makeCacheableSignalKeyStore);
+    console.log('[WhatsApp] Browsers:', Browsers ? 'available' : 'undefined');
     
     // Get existing auth state or create new one
     let authState = await getAuthState(this.shopId);
@@ -472,17 +474,26 @@ class WhatsAppService {
       },
     }, logger);
     
-    // Create socket
+    // Create socket with proper WhatsApp version and browser fingerprint
+    // Version [2, 3000, 1028401180] is confirmed working for 405 error fix
+    const waVersion: [number, number, number] = [2, 3000, 1028401180];
+    const browserConfig = Browsers ? Browsers.macOS('Chrome') : ["Shopify Logistics", "Chrome", "1.0.0"];
+    
+    console.log('[WhatsApp] Using WhatsApp version:', waVersion);
+    console.log('[WhatsApp] Using browser:', browserConfig);
+    
     this.socket = makeWASocket({
       auth: {
         creds: authState.creds,
         keys: signalKeyStore,
       },
       printQRInTerminal: false,
-      browser: ["Shopify Logistics", "Chrome", "1.0.0"],
+      browser: browserConfig,
+      version: waVersion,
       connectTimeoutMs: 60000,
       keepAliveIntervalMs: 25000,
       logger,
+      markOnlineOnConnect: false,
     });
     
     activeSockets.set(this.shopId, this.socket);
