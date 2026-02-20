@@ -4,6 +4,7 @@ import QRCode from "qrcode";
 import { 
   initWhatsAppConnection,
   getWhatsAppStatus,
+  sendWhatsAppMessage,
   type ConnectionStatus 
 } from "../whatsapp.server";
 
@@ -19,6 +20,21 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const action = url.searchParams.get("action") || "status";
   
   try {
+    if (action === "send-message") {
+      const phone = url.searchParams.get("phone");
+      const message = url.searchParams.get("message") || "Test depuis Multi Logistics 🚀";
+      
+      if (!phone) {
+        return json({ error: "phone parameter required" }, { status: 400 });
+      }
+      
+      // Format: number@s.whatsapp.net
+      const jid = phone.includes("@") ? phone : `${phone.replace(/\D/g,"")}@s.whatsapp.net`;
+      
+      const result = await sendWhatsAppMessage(TEST_SHOP_ID, jid, message);
+      return json({ success: result.success, messageId: result.messageId, error: result.error });
+    }
+    
     if (action === "connect") {
       console.log("[WhatsApp Test] Starting connection test...");
       

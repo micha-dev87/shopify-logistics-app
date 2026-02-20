@@ -522,6 +522,27 @@ class WhatsAppService {
   /**
    * Send delivery notification with buttons
    */
+  async sendMessage(
+    jid: string,
+    text: string
+  ): Promise<{ success: boolean; messageId?: string; error?: string }> {
+    if (!this.socket) {
+      this.socket = activeSockets.get(this.shopId);
+      if (!this.socket) {
+        return { success: false, error: "WhatsApp not connected" };
+      }
+    }
+    try {
+      const result = await this.socket.sendMessage(jid, { text });
+      return { success: true, messageId: result?.key?.id };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : "Failed to send message",
+      };
+    }
+  }
+
   async sendDeliveryNotification(
     jid: string,
     bill: DeliveryNotificationData,
@@ -918,6 +939,18 @@ export async function requestWhatsAppPairingCode(
 ): Promise<string | null> {
   const service = createWhatsAppService(shopId);
   return service.requestPairingCode(phoneNumber);
+}
+
+/**
+ * Send a simple text message via WhatsApp
+ */
+export async function sendWhatsAppMessage(
+  shopId: string,
+  jid: string,
+  message: string
+): Promise<{ success: boolean; messageId?: string; error?: string }> {
+  const service = createWhatsAppService(shopId);
+  return service.sendMessage(jid, message);
 }
 
 /**
