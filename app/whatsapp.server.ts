@@ -495,6 +495,9 @@ class WhatsAppService {
       keepAliveIntervalMs: 25000,
       logger,
       markOnlineOnConnect: false,
+      // CRITICAL: Prevents "Stream Errored (conflict)" after QR scan
+      // See: https://github.com/WhiskeySockets/Baileys/issues/2094
+      syncFullHistory: false,
     });
     
     activeSockets.set(this.shopId, this.socket);
