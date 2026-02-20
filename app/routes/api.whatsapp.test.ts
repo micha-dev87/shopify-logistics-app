@@ -22,25 +22,45 @@ export async function loader({ request }: LoaderFunctionArgs) {
     if (action === "connect") {
       console.log("[WhatsApp Test] Starting connection test...");
       
+      let qrCodeData: string | null = null;
+      let connectionStatus: ConnectionStatus | null = null;
+      
       await initWhatsAppConnection(
         TEST_SHOP_ID,
         async (qr: string) => {
           console.log(`[WhatsApp Test] QR generated, length: ${qr.length}`);
+          qrCodeData = qr;
         },
         async (status: ConnectionStatus) => {
           console.log(`[WhatsApp Test] Status update:`, JSON.stringify(status));
+          connectionStatus = status;
         }
       );
       
-      await new Promise(resolve => setTimeout(resolve, 5000));
+      // Wait for QR with timeout (up to 30 seconds)
+      let attempts = 0;
+      const maxAttempts = 30;
       
-      const status = await getWhatsAppStatus(TEST_SHOP_ID);
+      while (!qrCodeData && attempts < maxAttempts) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        // Check if QR is available in database
+        const status = await getWhatsAppStatus(TEST_SHOP_ID);
+        if (status.qrCode) {
+          qrCodeData = status.qrCode;
+          connectionStatus = status;
+          break;
+        }
+        
+        attempts++;
+        console.log(`[WhatsApp Test] Waiting for QR... attempt ${attempts}/${maxAttempts}`);
+      }
       
       return json({
         success: true,
-        message: "Connection test completed",
-        qrCode: status.qrCode,
-        qrExpiry: status.qrExpiry?.toISOString(),
+        message: qrCodeData ? "QR code generated" : "Connection initiated but QR not yet available",
+        qrCode: qrCodeData,
+        qrExpiry: connectionStatus?.qrExpiry?.toISOString(),
       });
     }
     
