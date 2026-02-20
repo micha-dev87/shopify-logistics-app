@@ -4,6 +4,7 @@
 import type { DeliveryBill, DeliveryAgent, Shop } from "@prisma/client";
 import prisma from "./db.server";
 import { Redis } from "ioredis";
+import QRCode from "qrcode";
 
 // ============================================================
 // TYPES
@@ -508,19 +509,25 @@ class WhatsAppService {
       
       if (qr) {
         console.log('[WhatsApp] QR code received, length:', qr.length);
-        // Encode QR as base64 to preserve binary characters
-        const qrBase64 = Buffer.from(qr, 'utf-8').toString('base64');
-        console.log('[WhatsApp] QR base64 length:', qrBase64.length);
         
-        // Save and emit QR code
-        await saveQRCode(this.shopId, qrBase64);
+        // Generate QR data URL directly using qrcode library
+        // Baileys QR is already a text string with base64 segments - pass it directly
+        const qrDataUrl = await QRCode.toDataURL(qr, {
+          width: 256,
+          margin: 2,
+          color: { dark: "#000000", light: "#ffffff" },
+        });
+        console.log('[WhatsApp] QR data URL generated, length:', qrDataUrl.length);
+        
+        // Save and emit QR code as data URL (data:image/png;base64,...)
+        await saveQRCode(this.shopId, qrDataUrl);
         if (qrCallback) {
-          qrCallback(qrBase64);
+          qrCallback(qrDataUrl);
         }
         if (statusCallback) {
           statusCallback({
             connected: false,
-            qrCode: qrBase64,
+            qrCode: qrDataUrl,
             qrExpiry: new Date(Date.now() + 60000),
           });
         }
