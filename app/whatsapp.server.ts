@@ -293,7 +293,7 @@ async function saveAuthState(shopId: string, creds: any, keys: any): Promise<voi
 }
 
 async function saveQRCode(shopId: string, qr: string): Promise<void> {
-  const expiry = new Date(Date.now() + 60000); // QR expires in 60 seconds
+  const expiry = new Date(Date.now() + 120000); // QR expires in 120 seconds (2 minutes)
   
   await prisma.whatsAppSession.upsert({
     where: { shopId },
@@ -538,7 +538,7 @@ class WhatsAppService {
           statusCallback({
             connected: false,
             qrCode: qrDataUrl,
-            qrExpiry: new Date(Date.now() + 60000),
+            qrExpiry: new Date(Date.now() + 120000), // 2 minutes
           });
         }
       }

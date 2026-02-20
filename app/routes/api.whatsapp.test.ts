@@ -137,8 +137,30 @@ export async function loader({ request }: LoaderFunctionArgs) {
   </div>
   
   <script>
-    // Auto-refresh every 5 seconds if not connected
-    ${!status.connected ? 'setTimeout(() => location.reload(), 5000);' : ''}
+    // Auto-refresh every 30 seconds if not connected (and user is not interacting)
+    let autoRefreshTimer;
+    let userInteracting = false;
+    
+    // Detect user interaction with phone input
+    document.addEventListener('DOMContentLoaded', function() {
+      const phoneInput = document.getElementById('phoneInput');
+      if (phoneInput) {
+        phoneInput.addEventListener('focus', () => { userInteracting = true; });
+        phoneInput.addEventListener('blur', () => { userInteracting = false; });
+      }
+    });
+    
+    ${!status.connected ? `
+    function scheduleRefresh() {
+      if (!userInteracting) {
+        autoRefreshTimer = setTimeout(() => location.reload(), 30000); // 30 seconds
+      } else {
+        // Retry in 5 seconds if user is interacting
+        autoRefreshTimer = setTimeout(scheduleRefresh, 5000);
+      }
+    }
+    scheduleRefresh();
+    ` : ''}
     
     async function requestPairingCode() {
       const phone = document.getElementById('phoneInput').value.replace(/\D/g, '');
