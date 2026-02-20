@@ -427,15 +427,18 @@ class WhatsAppService {
     // Get existing auth state or create new one
     let authState = await getAuthState(this.shopId);
     
-    // If no existing session, initialize new credentials
-    if (!authState || !authState.creds || Object.keys(authState.creds).length === 0) {
-      console.log('[WhatsApp] No existing session, creating new credentials');
+    // Validate credentials have required noiseKey (essential for handshake)
+    // Credentials may be empty, partial, or corrupted from previous attempts
+    const hasValidCreds = authState?.creds?.noiseKey?.private && authState?.creds?.noiseKey?.public;
+    
+    if (!hasValidCreds) {
+      console.log('[WhatsApp] No valid credentials found, creating fresh ones');
       authState = {
         creds: initAuthCreds(),
         keys: {},
       };
-      // Don't save initial empty state - wait for creds.update from Baileys
-      // This ensures we only save valid credentials
+    } else {
+      console.log('[WhatsApp] Loaded existing valid credentials');
     }
     
     // Create a simple logger for Baileys - enable debug for troubleshooting
@@ -581,10 +584,11 @@ class WhatsAppService {
       }
     });
     
-    // Save credentials on update
-    this.socket.ev.on("creds.update", async (creds: any) => {
-      const currentState = await getAuthState(this.shopId);
-      await saveAuthState(this.shopId, creds, currentState?.keys || {});
+    // Save credentials on update - MERGE with existing, not replace
+    // Baileys emits partial credential updates, so we must merge them
+    this.socket.ev.on("creds.update", async (update: any) => {
+      authState!.creds = { ...authState!.creds, ...update };
+      await saveAuthState(this.shopId, authState!.creds, authState!.keys || {});
     });
     
     // Handle incoming messages (for button callbacks)
