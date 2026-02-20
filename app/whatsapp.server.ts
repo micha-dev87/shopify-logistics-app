@@ -716,42 +716,73 @@ class WhatsAppService {
    * Phone number must be in E.164 format without + (e.g., "33612345678")
    */
   async requestPairingCode(phoneNumber: string): Promise<string | null> {
-    if (!this.socket) {
-      console.log('[WhatsApp] No socket available, creating one first...');
-      await this.connect(() => {}, () => {});
-      // Wait a bit for connection to establish
-      await new Promise(resolve => setTimeout(resolve, 3000));
+    // Clear any existing session to ensure fresh connection
+    console.log('[WhatsApp] Clearing existing session for pairing code...');
+    await prisma.whatsAppSession.deleteMany({
+      where: { shopId: this.shopId }
+    });
+    
+    // Close existing socket if any
+    if (this.socket) {
+      try {
+        await this.socket.end();
+      } catch (e) {
+        // Ignore errors when closing
+      }
+      this.socket = null;
+      activeSockets.delete(this.shopId);
     }
     
-    if (!this.socket) {
-      console.error('[WhatsApp] Failed to create socket');
-      return null;
-    }
+    // Wait a moment to ensure cleanup
+    await new Promise(resolve => setTimeout(resolve, 1000));
     
-    try {
-      console.log('[WhatsApp] Requesting pairing code for:', phoneNumber);
-      const code = await this.socket.requestPairingCode(phoneNumber);
-      console.log('[WhatsApp] Pairing code received:', code);
+    // Create new connection
+    console.log('[WhatsApp] Creating new socket for pairing code...');
+    
+    return new Promise((resolve, reject) => {
+      let pairingCode: string | null = null;
+      let connectionReady = false;
       
-      // Store the pairing code in the session
-      await prisma.whatsAppSession.upsert({
-        where: { shopId: this.shopId },
-        create: {
-          shopId: this.shopId,
-          creds: {},
-          keys: {},
-          connected: false,
+      this.connect(
+        (qr) => {
+          console.log('[WhatsApp] QR generated during pairing setup');
         },
-        update: {
-          connected: false,
-        },
+        async (status) => {
+          console.log('[WhatsApp] Connection status during pairing:', JSON.stringify(status));
+          
+          if (status.connected) {
+            // Already connected, shouldn't happen for pairing
+            resolve(null);
+          } else if (!connectionReady && this.socket) {
+            // Connection is ready (QR phase), request pairing code
+            connectionReady = true;
+            try {
+              console.log('[WhatsApp] Requesting pairing code for:', phoneNumber);
+              const code = await this.socket!.requestPairingCode(phoneNumber);
+              console.log('[WhatsApp] Pairing code received:', code);
+              pairingCode = code;
+              resolve(code);
+            } catch (error) {
+              console.error('[WhatsApp] Failed to get pairing code:', error);
+              reject(error);
+            }
+          }
+        }
+      ).catch(error => {
+        console.error('[WhatsApp] Connection failed:', error);
+        reject(error);
       });
       
-      return code;
-    } catch (error) {
-      console.error('[WhatsApp] Failed to get pairing code:', error);
+      // Timeout after 30 seconds
+      setTimeout(() => {
+        if (!pairingCode) {
+          reject(new Error('Timeout waiting for pairing code'));
+        }
+      }, 30000);
+    }).catch(error => {
+      console.error('[WhatsApp] Pairing code error:', error);
       return null;
-    }
+    });
   }
   
   // ============================================================
