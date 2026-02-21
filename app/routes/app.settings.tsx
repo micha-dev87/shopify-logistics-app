@@ -689,22 +689,22 @@ export default function SettingsPage() {
                           </Text>
                         ) : availableAgents.length === 0 ? (
                           <Banner tone="warning">
-                            Aucun livreur avec WhatsApp configuré. Ajoutez un livreur avec un numéro WhatsApp dans la section Livreurs.
+                            Aucun livreur actif trouvé. Ajoutez des livreurs dans la section Livreurs.
                           </Banner>
                         ) : (
                           <FormLayout>
                             <Select
-                              label="Livreur"
+                              label="Livreur destinataire"
                               options={[
                                 { label: "Sélectionner un livreur", value: "" },
-                                ...availableAgents.map(agent => ({
+                                ...availableAgents.map((agent: {id: string; name: string; phone: string; whatsappJid: string}) => ({
                                   label: `${agent.name} (${agent.phone})`,
                                   value: agent.id,
                                 })),
                               ]}
                               value={selectedAgentId}
                               onChange={setSelectedAgentId}
-                              helpText="Le livreur doit avoir un numéro WhatsApp configuré"
+                              helpText="Le message sera envoyé au numéro WhatsApp du livreur"
                             />
                             
                             <TextField

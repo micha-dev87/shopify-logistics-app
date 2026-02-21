@@ -5,6 +5,21 @@ import prisma from "../db.server";
 import { sendDeliveryNotification } from "../whatsapp.server";
 
 // ============================================================
+// HELPERS
+// ============================================================
+
+/**
+ * Construit le WhatsApp JID depuis un numéro de téléphone.
+ * Si le JID existe déjà, on l'utilise. Sinon on le construit.
+ * Format Baileys : "14508221064@s.whatsapp.net"
+ */
+function buildWhatsAppJid(phone: string, existingJid: string | null): string {
+  if (existingJid) return existingJid;
+  const cleaned = phone.replace(/\D/g, "");
+  return `${cleaned}@s.whatsapp.net`;
+}
+
+// ============================================================
 // LOADER - Get available agents for testing
 // ============================================================
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -16,13 +31,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
       where: { domain: shopDomain },
       include: {
         deliveryAgents: {
-          where: { 
-            isActive: true,
-            whatsappJid: { not: null },
-          },
-          select: { 
-            id: true, 
-            name: true, 
+          where: { isActive: true },
+          select: {
+            id: true,
+            name: true,
             phone: true,
             whatsappJid: true,
             role: true,
@@ -38,11 +50,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
     return json({
       success: true,
-      agents: shop.deliveryAgents.map(agent => ({
+      agents: shop.deliveryAgents.map((agent) => ({
         id: agent.id,
         name: agent.name,
         phone: agent.phone,
-        whatsappJid: agent.whatsappJid,
+        // JID effectif (existant ou construit depuis le téléphone)
+        whatsappJid: buildWhatsAppJid(agent.phone, agent.whatsappJid),
+        hasExplicitJid: !!agent.whatsappJid,
         role: agent.role,
       })),
     });
@@ -107,25 +121,23 @@ export async function action({ request }: ActionFunctionArgs) {
 
     const agent = shop.deliveryAgents[0];
 
-    if (!agent.whatsappJid) {
-      return json(
-        { error: `Le livreur ${agent.name} n'a pas de numéro WhatsApp configuré` },
-        { status: 400 }
-      );
-    }
+    // Construire le JID (whatsappJid explicite ou depuis le numéro de tél.)
+    const targetJid = buildWhatsAppJid(agent.phone, agent.whatsappJid);
 
-    // Send test delivery notification
+    // Numéro de commande de test unique
+    const testOrderSuffix = Date.now().toString().slice(-6);
     const testBillId = `test-${Date.now()}`;
+
     const result = await sendDeliveryNotification(
       shop.id,
-      agent.whatsappJid,
+      targetJid,
       {
-        orderName: `#TEST-${new Date().getTime().toString().slice(-6)}`,
+        orderName: `#TEST-${testOrderSuffix}`,
         customerName: customerName.trim(),
         customerAddress: customerAddress.trim(),
         customerPhone: customerPhone.trim() || null,
         productTitle: productTitle.trim(),
-        productQuantity: productQuantity,
+        productQuantity,
         productImage: null,
       },
       testBillId
@@ -134,14 +146,8 @@ export async function action({ request }: ActionFunctionArgs) {
     if (result.success) {
       return json({
         success: true,
-        message: `Notification de test envoyée à ${agent.name} (${agent.whatsappJid})`,
+        message: `✅ Notification de test envoyée à ${agent.name} (${targetJid})`,
         messageId: result.messageId,
-        testData: {
-          agentName: agent.name,
-          productTitle: productTitle.trim(),
-          productQuantity,
-          orderName: `#TEST-${new Date().getTime().toString().slice(-6)}`,
-        },
       });
     } else {
       return json(
