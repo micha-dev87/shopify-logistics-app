@@ -105,8 +105,8 @@ export async function action({ request }: ActionFunctionArgs) {
       where: { domain: shopDomain },
       include: {
         deliveryAgents: {
-          where: { id: agentId },
-          select: { id: true, name: true, whatsappJid: true },
+          where: { id: agentId, isActive: true },
+          select: { id: true, name: true, phone: true, whatsappJid: true },
         },
       },
     });
