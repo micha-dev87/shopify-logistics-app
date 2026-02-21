@@ -916,6 +916,20 @@ export async function notifyAgentViaWhatsApp(
 }
 
 /**
+ * Send a delivery notification to a specific JID
+ * Used for testing and manual notifications
+ */
+export async function sendDeliveryNotification(
+  shopId: string,
+  jid: string,
+  bill: DeliveryNotificationData,
+  billId: string
+): Promise<{ success: boolean; messageId?: string; error?: string }> {
+  const service = createWhatsAppService(shopId);
+  return service.sendDeliveryNotification(jid, bill, billId);
+}
+
+/**
  * Get rate limit info for dashboard
  */
 export async function getWhatsAppRateLimitInfo(shopId: string): Promise<RateLimitInfo> {

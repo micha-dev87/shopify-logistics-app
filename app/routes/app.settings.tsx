@@ -264,6 +264,8 @@ export default function SettingsPage() {
   const navigation = useNavigation();
   const qrFetcher = useFetcher();
   const statusFetcher = useFetcher();
+  const testDeliveryFetcher = useFetcher();
+  const agentsFetcher = useFetcher();
   const isSubmitting = navigation.state === "submitting";
 
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -278,6 +280,15 @@ export default function SettingsPage() {
   const [waStatus, setWaStatus] = useState<ConnectionStatus | null>(loaderData.whatsapp?.status || null);
   const [rateLimit, setRateLimit] = useState<RateLimitInfo | null>(loaderData.whatsapp?.rateLimit || null);
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Test delivery form state
+  const [selectedAgentId, setSelectedAgentId] = useState<string>("");
+  const [productTitle, setProductTitle] = useState<string>("");
+  const [productQuantity, setProductQuantity] = useState<string>("1");
+  const [testCustomerName, setTestCustomerName] = useState<string>("Client Test");
+  const [testCustomerAddress, setTestCustomerAddress] = useState<string>("123 Rue de Test, Abidjan");
+  const [availableAgents, setAvailableAgents] = useState<Array<{id: string; name: string; phone: string; whatsappJid: string | null}>>([]);
+  const [isLoadingAgents, setIsLoadingAgents] = useState(false);
 
   useEffect(() => {
     if (actionData?.success) {
@@ -355,6 +366,55 @@ export default function SettingsPage() {
     qrFetcher.submit({}, { method: "DELETE", action: "/api/whatsapp/qr" });
     setWaStatus({ connected: false });
     setQrCodeUrl(null);
+  };
+
+  // Load available agents when WhatsApp is connected
+  useEffect(() => {
+    if (waStatus?.connected && !isLoadingAgents && availableAgents.length === 0) {
+      setIsLoadingAgents(true);
+      agentsFetcher.load("/api/whatsapp/test-delivery");
+    }
+  }, [waStatus?.connected]);
+
+  // Handle agents fetcher response
+  useEffect(() => {
+    if (agentsFetcher.data?.success) {
+      setAvailableAgents(agentsFetcher.data.agents);
+      setIsLoadingAgents(false);
+    } else if (agentsFetcher.data?.error) {
+      setIsLoadingAgents(false);
+    }
+  }, [agentsFetcher.data]);
+
+  // Handle test delivery response
+  useEffect(() => {
+    if (testDeliveryFetcher.data?.success) {
+      setToastMessage(testDeliveryFetcher.data.message);
+      setToastError(false);
+      // Reset form
+      setSelectedAgentId("");
+      setProductTitle("");
+      setProductQuantity("1");
+    } else if (testDeliveryFetcher.data?.error) {
+      setToastMessage(testDeliveryFetcher.data.error);
+      setToastError(true);
+    }
+  }, [testDeliveryFetcher.data]);
+
+  // Submit test delivery
+  const handleSendTestDelivery = () => {
+    const formData = new FormData();
+    formData.append("action", "send-test-delivery");
+    formData.append("agentId", selectedAgentId);
+    formData.append("productTitle", productTitle);
+    formData.append("productQuantity", productQuantity);
+    formData.append("customerName", testCustomerName);
+    formData.append("customerAddress", testCustomerAddress);
+    
+    testDeliveryFetcher.submit(formData, {
+      method: "POST",
+      action: "/api/whatsapp/test-delivery",
+    });
   };
 
   if (!loaderData.shop) {
@@ -611,6 +671,85 @@ export default function SettingsPage() {
                       <Button tone="critical" onClick={handleDisconnectWhatsApp} loading={qrFetcher.state !== "idle"}>
                         Déconnecter WhatsApp
                       </Button>
+
+                      <Divider />
+
+                      {/* Test Delivery Notification */}
+                      <BlockStack gap="400">
+                        <Text as="h3" variant="headingSm">
+                          Tester la notification de livraison
+                        </Text>
+                        <Text variant="bodyMd" tone="subdued">
+                          Envoyez une notification de test à un livreur pour vérifier le format et le fonctionnement.
+                        </Text>
+                        
+                        {isLoadingAgents ? (
+                          <Text variant="bodyMd" tone="subdued">
+                            Chargement des livreurs...
+                          </Text>
+                        ) : availableAgents.length === 0 ? (
+                          <Banner tone="warning">
+                            Aucun livreur avec WhatsApp configuré. Ajoutez un livreur avec un numéro WhatsApp dans la section Livreurs.
+                          </Banner>
+                        ) : (
+                          <FormLayout>
+                            <Select
+                              label="Livreur"
+                              options={[
+                                { label: "Sélectionner un livreur", value: "" },
+                                ...availableAgents.map(agent => ({
+                                  label: `${agent.name} (${agent.phone})`,
+                                  value: agent.id,
+                                })),
+                              ]}
+                              value={selectedAgentId}
+                              onChange={setSelectedAgentId}
+                              helpText="Le livreur doit avoir un numéro WhatsApp configuré"
+                            />
+                            
+                            <TextField
+                              label="Nom du produit"
+                              value={productTitle}
+                              onChange={setProductTitle}
+                              placeholder="Ex: iPhone 15 Pro"
+                              autoComplete="off"
+                            />
+                            
+                            <TextField
+                              label="Quantité"
+                              type="number"
+                              value={productQuantity}
+                              onChange={setProductQuantity}
+                              autoComplete="off"
+                            />
+                            
+                            <TextField
+                              label="Nom du client (test)"
+                              value={testCustomerName}
+                              onChange={setTestCustomerName}
+                              placeholder="Client Test"
+                              autoComplete="off"
+                            />
+                            
+                            <TextField
+                              label="Adresse de livraison (test)"
+                              value={testCustomerAddress}
+                              onChange={setTestCustomerAddress}
+                              placeholder="123 Rue de Test, Abidjan"
+                              autoComplete="off"
+                            />
+                            
+                            <Button 
+                              primary 
+                              onClick={handleSendTestDelivery}
+                              loading={testDeliveryFetcher.state !== "idle"}
+                              disabled={!selectedAgentId || !productTitle.trim()}
+                            >
+                              Envoyer la notification de test
+                            </Button>
+                          </FormLayout>
+                        )}
+                      </BlockStack>
                     </BlockStack>
                   ) : (
                     <BlockStack gap="400">
