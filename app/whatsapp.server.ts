@@ -572,18 +572,29 @@ class WhatsAppService {
     }
     
     if (!this.socket) {
+      this.socket = activeSockets.get(this.shopId);
+    }
+
+    // Auto-reconnect if socket is unavailable but session exists in DB
+    if (!this.socket) {
       const session = await prisma.whatsAppSession.findUnique({
         where: { shopId: this.shopId },
       });
-      
+
       if (!session?.connected) {
         return { success: false, error: "WhatsApp not connected" };
       }
-      
-      // Socket should exist if connected
-      this.socket = activeSockets.get(this.shopId);
+
+      console.log('[WhatsApp] Socket unavailable for delivery, attempting auto-reconnect...');
+      await this.connect(() => {}, () => {});
+      // Wait up to 15s for reconnection
+      for (let i = 0; i < 15; i++) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        this.socket = activeSockets.get(this.shopId);
+        if (this.socket) break;
+      }
       if (!this.socket) {
-        return { success: false, error: "WhatsApp socket not available" };
+        return { success: false, error: "WhatsApp not connected - please reconnect in settings" };
       }
     }
     
