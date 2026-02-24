@@ -330,20 +330,10 @@ export default function SettingsPage() {
   }, [statusFetcher.data]);
 
   // Generate QR code image
-  const generateQRCodeImage = async (qrData: string) => {
-    try {
-      const QRCode = (await import("qrcode")).default;
-      // Decode base64 QR code back to original format
-      const qrRaw = atob(qrData);
-      const url = await QRCode.toDataURL(qrRaw, {
-        width: 256,
-        margin: 2,
-        color: { dark: "#000000", light: "#ffffff" },
-      });
-      setQrCodeUrl(url);
-    } catch (err) {
-      console.error("Error generating QR code:", err);
-    }
+  // The server sends qrCode as a ready-to-use data:image/png;base64,... URL
+  // No need to decode or re-render — just use it directly as <img src>
+  const generateQRCodeImage = (qrData: string) => {
+    setQrCodeUrl(qrData);
   };
 
   // Initialize WhatsApp connection
