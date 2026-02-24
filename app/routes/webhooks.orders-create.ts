@@ -316,9 +316,10 @@ async function assignBestAgent(
       }
 
       // WHATSAPP or BOTH (as backup): Try WhatsApp if Telegram failed or mode is WHATSAPP only
-      if (!notificationSent && 
+      // Note: notifyAgentViaWhatsApp handles JID fallback and session check internally
+      if (!notificationSent &&
           (notificationMode === "WHATSAPP" || notificationMode === "BOTH") &&
-          selectedAgent.whatsappJid && shop.whatsappEnabled) {
+          (selectedAgent.whatsappJid || selectedAgent.phone)) {
         const notifResult = await notifyAgentViaWhatsApp(
           agentWithShop as any,
           updatedBill,

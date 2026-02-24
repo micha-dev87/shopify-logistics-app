@@ -901,18 +901,29 @@ export async function notifyAgentViaWhatsApp(
   agent: DeliveryAgent & { shop: Shop },
   bill: DeliveryBill
 ): Promise<{ success: boolean; messageId?: string; error?: string }> {
-  if (!agent.whatsappJid) {
-    return { success: false, error: "Agent has no WhatsApp JID" };
+  // Build JID from whatsappJid or fallback to phone number
+  const jid = agent.whatsappJid || (() => {
+    const cleaned = agent.phone?.replace(/\D/g, "");
+    return cleaned ? `${cleaned}@s.whatsapp.net` : null;
+  })();
+
+  if (!jid) {
+    return { success: false, error: "Agent has no phone or WhatsApp JID" };
   }
-  
-  if (!agent.shop.whatsappEnabled) {
-    return { success: false, error: "WhatsApp not enabled for this shop" };
+
+  // Check WhatsApp session is connected (not just shop.whatsappEnabled which can lag)
+  const session = await prisma.whatsAppSession.findUnique({
+    where: { shopId: agent.shop.id },
+  });
+
+  if (!session?.connected) {
+    return { success: false, error: "WhatsApp not connected for this shop" };
   }
-  
+
   const whatsapp = createWhatsAppService(agent.shop.id);
-  
+
   return whatsapp.sendDeliveryNotification(
-    agent.whatsappJid,
+    jid,
     {
       orderName: bill.orderName,
       customerName: bill.customerName,
@@ -999,3 +1010,56 @@ export async function disconnectWhatsApp(shopId: string): Promise<void> {
   const service = createWhatsAppService(shopId);
   return service.disconnect();
 }
+
+/**
+ * Auto-reconnect all shops that had an active WhatsApp session.
+ * Call this at server startup to restore connections after restarts.
+ */
+export async function autoReconnectAllShops(): Promise<void> {
+  try {
+    const sessions = await prisma.whatsAppSession.findMany({
+      where: { connected: true },
+      select: { shopId: true },
+    });
+
+    if (sessions.length === 0) {
+      console.log('[WhatsApp] No active sessions to reconnect at startup');
+      return;
+    }
+
+    console.log(`[WhatsApp] Auto-reconnecting ${sessions.length} shop(s) at startup...`);
+
+    for (const { shopId } of sessions) {
+      // Skip if already connected (e.g. hot reload)
+      if (activeSockets.has(shopId)) continue;
+
+      try {
+        const service = createWhatsAppService(shopId);
+        await service.connect(
+          () => {}, // No QR needed - restoring existing session
+          (status) => {
+            if (status.connected) {
+              console.log(`[WhatsApp] Shop ${shopId} auto-reconnected successfully`);
+            } else if (status.error) {
+              console.warn(`[WhatsApp] Shop ${shopId} auto-reconnect status:`, status.error);
+            }
+          },
+        );
+      } catch (err) {
+        console.error(`[WhatsApp] Failed to auto-reconnect shop ${shopId}:`, err);
+      }
+    }
+  } catch (err) {
+    console.error('[WhatsApp] Error during auto-reconnect at startup:', err);
+  }
+}
+
+// ============================================================
+// STARTUP: Auto-reconnect all active sessions on module load
+// ============================================================
+// Delay slightly to let Prisma connection pool settle
+setTimeout(() => {
+  autoReconnectAllShops().catch(err => {
+    console.error('[WhatsApp] Startup auto-reconnect failed:', err);
+  });
+}, 3000);
