@@ -342,6 +342,7 @@ class WhatsAppService {
     const initAuthCreds = baileys.initAuthCreds || baileys.default?.initAuthCreds;
     const makeCacheableSignalKeyStore = baileys.makeCacheableSignalKeyStore || baileys.default?.makeCacheableSignalKeyStore;
     const Browsers = baileys.Browsers || baileys.default?.Browsers;
+    const fetchLatestWaWebVersion = baileys.fetchLatestWaWebVersion || baileys.default?.fetchLatestWaWebVersion;
     
     console.log('[WhatsApp] makeWASocket:', typeof makeWASocket, makeWASocket ? 'function' : 'undefined');
     console.log('[WhatsApp] DisconnectReason:', DisconnectReason);
@@ -399,11 +400,20 @@ class WhatsAppService {
       },
     }, logger);
     
-    // Create socket with proper WhatsApp version and browser fingerprint
-    // Version [2, 3000, 1028401180] with macOS Chrome works for QR generation
-    const waVersion: [number, number, number] = [2, 3000, 1028401180];
+    // Fetch the latest WhatsApp Web version dynamically to avoid 405 rejections
+    // WhatsApp rejects connections with outdated versions
+    let waVersion: [number, number, number] = [2, 3000, 1033964768]; // fallback
+    if (fetchLatestWaWebVersion) {
+      try {
+        const { version } = await fetchLatestWaWebVersion();
+        waVersion = version;
+        console.log('[WhatsApp] Fetched latest WA version:', waVersion);
+      } catch (e) {
+        console.warn('[WhatsApp] Could not fetch latest WA version, using fallback:', waVersion);
+      }
+    }
     const browserConfig = Browsers ? Browsers.macOS('Chrome') : ["Mac OS", "Chrome", "120.0.0"];
-    
+
     console.log('[WhatsApp] Using WhatsApp version:', waVersion);
     console.log('[WhatsApp] Using browser:', browserConfig);
     
