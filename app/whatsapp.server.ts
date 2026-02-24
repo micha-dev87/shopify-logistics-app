@@ -317,11 +317,17 @@ class WhatsAppService {
         });
         return;
       }
+      
+      // Socket exists but not connected — close it before creating a new one
+      // to avoid multiple parallel reconnect loops
+      const existingSocket = activeSockets.get(this.shopId);
+      try { existingSocket?.end?.(); } catch (_e) {}
+      activeSockets.delete(this.shopId);
     }
-    
+
     await this.createSocket();
   }
-  
+
   /**
    * Create a new Baileys socket
    */
@@ -480,6 +486,24 @@ class WhatsAppService {
         const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
         
         await setDisconnected(this.shopId);
+        
+        // 405 = Connection Failure = pre-keys are cryptographically invalid on WA servers
+        // (usually caused by a conflicting external Baileys session)
+        // Clear credentials so next connect() generates a fresh QR code instead of looping
+        if (statusCode === 405) {
+          console.log('[WhatsApp] 405 Connection Failure — clearing corrupted credentials for fresh QR');
+          try {
+            await prisma.whatsAppSession.updateMany({
+              where: { shopId: this.shopId },
+              data: { creds: {}, keys: {} },
+            });
+          } catch (_e) {}
+          activeSockets.delete(this.shopId);
+          if (statusCallback) {
+            statusCallback({ connected: false, error: 'Session expirée — reconnectez-vous pour générer un nouveau QR' });
+          }
+          return; // Do NOT schedule a reconnect
+        }
         
         if (statusCallback) {
           statusCallback({
