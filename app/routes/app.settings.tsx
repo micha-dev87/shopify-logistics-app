@@ -24,7 +24,7 @@ import { TitleBar } from "@shopify/app-bridge-react";
 import { useCallback, useState, useEffect, useRef } from "react";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
-import { createTelegramService } from "../telegram.server";
+
 import {
   getWhatsAppStatus,
   getWhatsAppRateLimitInfo,
@@ -35,7 +35,7 @@ import {
 // ============================================================
 // TYPES
 // ============================================================
-type NotificationMode = "TELEGRAM" | "WHATSAPP" | "BOTH";
+type NotificationMode = "WHATSAPP";
 
 interface LoaderData {
   shop: {
@@ -43,14 +43,10 @@ interface LoaderData {
     name: string;
     domain: string;
     plan: string | null;
-    telegramBotToken: string | null;
-    telegramWebhookSet: boolean;
     notificationMode: NotificationMode;
     whatsappEnabled: boolean;
     whatsappPhone: string | null;
-    hasRealToken: boolean;
   } | null;
-  hasBot: boolean;
   whatsapp: {
     status: ConnectionStatus;
     rateLimit: RateLimitInfo;
@@ -71,8 +67,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       name: true,
       domain: true,
       plan: true,
-      telegramBotToken: true,
-      telegramWebhookSet: true,
       notificationMode: true,
       whatsappEnabled: true,
       whatsappPhone: true,
@@ -81,13 +75,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   });
 
   if (!shop) {
-    return json({ shop: null, hasBot: false, whatsapp: null });
+    return json({ shop: null, whatsapp: null });
   }
-
-  // Mask the bot token for display
-  const maskedToken = shop.telegramBotToken
-    ? `${shop.telegramBotToken.substring(0, 10)}...${shop.telegramBotToken.substring(shop.telegramBotToken.length - 5)}`
-    : null;
 
   // Get WhatsApp status and rate limit
   let waStatus = null;
@@ -100,12 +89,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   }
 
   return json({
-    shop: {
-      ...shop,
-      telegramBotToken: maskedToken,
-      hasRealToken: !!shop.telegramBotToken,
-    },
-    hasBot: !!shop.telegramBotToken,
+    shop,
     whatsapp: waStatus && waRateLimit ? { status: waStatus, rateLimit: waRateLimit } : null,
   });
 };
@@ -129,100 +113,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   try {
     switch (actionType) {
-      case "saveBotToken": {
-        const botToken = formData.get("botToken") as string;
-
-        if (!botToken || botToken.trim().length < 40) {
-          return json({ error: "Token invalide. Le token doit faire au moins 40 caractères." });
-        }
-
-        // Test the bot token
-        const telegram = createTelegramService(botToken.trim());
-        const testResult = await telegram.testConnection();
-
-        if (!testResult.success) {
-          return json({
-            error: `Token invalide: ${testResult.error || "Vérifiez que le token est correct."}`,
-          });
-        }
-
-        // Save the token
-        await prisma.shop.update({
-          where: { id: shop.id },
-          data: {
-            telegramBotToken: botToken.trim(),
-          },
-        });
-
-        // Set webhook for callback handling
-        const appUrl = process.env.SHOPIFY_APP_URL;
-        if (appUrl) {
-          const webhookUrl = `${appUrl}/api/telegram/callback`;
-          await telegram.setWebhook(webhookUrl);
-
-          await prisma.shop.update({
-            where: { id: shop.id },
-            data: { telegramWebhookSet: true },
-          });
-        }
-
-        return json({
-          success: true,
-          message: `Bot Telegram "${testResult.botInfo?.username || "configuré"}" connecté avec succès!`,
-          botInfo: testResult.botInfo,
-        });
-      }
-
-      case "testNotification": {
-        const testChatId = formData.get("testChatId") as string;
-
-        if (!shop.telegramBotToken) {
-          return json({ error: "Aucun bot Telegram configuré" });
-        }
-
-        if (!testChatId) {
-          return json({ error: "Veuillez entrer votre Telegram Chat ID" });
-        }
-
-        const telegram = createTelegramService(shop.telegramBotToken);
-
-        const result = await telegram.sendDeliveryNotification(
-          testChatId,
-          {
-            orderName: "#TEST-001",
-            customerName: "Client Test",
-            customerAddress: "123 Rue de Test, Paris",
-            customerPhone: "+33123456789",
-            productTitle: "Produit de test",
-            productImage: null,
-            productQuantity: 1,
-          },
-          "test-bill-id"
-        );
-
-        if (result.success) {
-          return json({ success: true, message: "Notification de test envoyée avec succès!" });
-        } else {
-          return json({ error: `Erreur: ${result.error}` });
-        }
-      }
-
-      case "removeBotToken": {
-        await prisma.shop.update({
-          where: { id: shop.id },
-          data: {
-            telegramBotToken: null,
-            telegramWebhookSet: false,
-          },
-        });
-
-        return json({ success: true, message: "Bot Telegram déconnecté" });
-      }
-
       case "updateNotificationMode": {
         const mode = formData.get("notificationMode") as NotificationMode;
 
-        if (!["TELEGRAM", "WHATSAPP", "BOTH"].includes(mode)) {
+        if (mode !== "WHATSAPP") {
           return json({ error: "Mode de notification invalide" });
         }
 
@@ -233,7 +127,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
         return json({
           success: true,
-          message: `Mode de notification mis à jour: ${getNotificationModeLabel(mode)}`,
+          message: "Mode de notification mis à jour: WhatsApp",
         });
       }
 
@@ -245,15 +139,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return json({ error: "Une erreur est survenue" }, { status: 500 });
   }
 };
-
-function getNotificationModeLabel(mode: NotificationMode): string {
-  const labels: Record<NotificationMode, string> = {
-    TELEGRAM: "Telegram uniquement",
-    WHATSAPP: "WhatsApp uniquement",
-    BOTH: "Telegram + WhatsApp (backup)",
-  };
-  return labels[mode];
-}
 
 // ============================================================
 // COMPONENT
@@ -270,11 +155,8 @@ export default function SettingsPage() {
 
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [toastError, setToastError] = useState(false);
-  const [botToken, setBotToken] = useState("");
-  const [testChatId, setTestChatId] = useState("");
-  const [showToken, setShowToken] = useState(false);
   const [notificationMode, setNotificationMode] = useState<NotificationMode>(
-    loaderData.shop?.notificationMode || "TELEGRAM"
+    loaderData.shop?.notificationMode || "WHATSAPP"
   );
   const [qrCodeUrl, setQrCodeUrl] = useState<string | null>(null);
   const [waStatus, setWaStatus] = useState<ConnectionStatus | null>(loaderData.whatsapp?.status || null);
@@ -294,7 +176,6 @@ export default function SettingsPage() {
     if (actionData?.success) {
       setToastMessage(actionData.message);
       setToastError(false);
-      setBotToken("");
     } else if (actionData?.error) {
       setToastMessage(actionData.error);
       setToastError(true);
@@ -444,156 +325,20 @@ export default function SettingsPage() {
             </Layout.Section>
           </Layout>
 
-          {/* Notification Mode */}
+          {/* Mode de notification - WhatsApp uniquement */}
           <Layout>
             <Layout.Section>
               <Card>
-                <Form method="post">
-                  <input type="hidden" name="actionType" value="updateNotificationMode" />
-                  <input type="hidden" name="notificationMode" value={notificationMode} />
-                  <BlockStack gap="400">
-                    <Text as="h2" variant="headingMd">
-                      Mode de notification
-                    </Text>
-                    <Text variant="bodyMd" tone="subdued">
-                      Choisissez comment les livreurs recevront les notifications de livraison.
-                    </Text>
-                    <Select
-                      label="Plateforme de notification"
-                      options={[
-                        { label: "Telegram uniquement", value: "TELEGRAM" },
-                        { label: "WhatsApp uniquement", value: "WHATSAPP" },
-                        { label: "Telegram + WhatsApp (backup)", value: "BOTH" },
-                      ]}
-                      value={notificationMode}
-                      onChange={(value) => setNotificationMode(value as NotificationMode)}
-                      helpText="Si 'Les deux' est sélectionné, Telegram sera essayé en premier, puis WhatsApp en backup."
-                    />
-                    <Button submit loading={isSubmitting}>
-                      Enregistrer le mode
-                    </Button>
-                  </BlockStack>
-                </Form>
+                <BlockStack gap="400">
+                  <Text as="h2" variant="headingMd">
+                    Mode de notification
+                  </Text>
+                  <Banner tone="info">
+                    <Text variant="bodyMd">Les notifications sont envoyées via WhatsApp uniquement.</Text>
+                  </Banner>
+                </BlockStack>
               </Card>
             </Layout.Section>
-          </Layout>
-
-          {/* Telegram Bot Configuration */}
-          <Layout>
-            <Layout.Section>
-              <Card>
-                <Form method="post">
-                  <input type="hidden" name="actionType" value="saveBotToken" />
-                  <BlockStack gap="400">
-                    <InlineStack gap="200" blockAlign="center">
-                      <Text as="h2" variant="headingMd">
-                        Bot Telegram
-                      </Text>
-                      {loaderData.hasBot && (
-                        <Banner tone="success">
-                          <Text variant="bodyMd">Connecté</Text>
-                        </Banner>
-                      )}
-                    </InlineStack>
-                    <Text variant="bodyMd" tone="subdued">
-                      Configurez votre bot Telegram pour envoyer des notifications aux livreurs. Créez un bot via{" "}
-                      <a href="https://t.me/BotFather" target="_blank" rel="noopener noreferrer">
-                        @BotFather
-                      </a>{" "}
-                      sur Telegram.
-                    </Text>
-
-                    <Divider />
-
-                    {loaderData.hasBot ? (
-                      <BlockStack gap="300">
-                        {loaderData.shop.hasRealToken && (
-                          <Text variant="bodyMd">Token: {loaderData.shop.telegramBotToken}</Text>
-                        )}
-
-                        <InlineStack gap="200">
-                          <Button
-                            tone="critical"
-                            submit
-                            loading={isSubmitting}
-                            onClick={() => {
-                              const form = document.createElement("form");
-                              form.method = "post";
-                              form.innerHTML = '<input type="hidden" name="actionType" value="removeBotToken">';
-                              document.body.appendChild(form);
-                              form.submit();
-                            }}
-                          >
-                            Déconnecter le bot
-                          </Button>
-                        </InlineStack>
-                      </BlockStack>
-                    ) : (
-                      <FormLayout>
-                        <TextField
-                          label="Token du Bot Telegram"
-                          name="botToken"
-                          value={botToken}
-                          onChange={setBotToken}
-                          autoComplete="off"
-                          placeholder="1234567890:ABCdefGHIjklMNOpqrsTUVwxyz"
-                          helpText="Obtenez ce token en créant un bot avec @BotFather sur Telegram"
-                          type={showToken ? "text" : "password"}
-                          suffix={
-                            <Button variant="plain" onClick={() => setShowToken(!showToken)}>
-                              {showToken ? "Masquer" : "Afficher"}
-                            </Button>
-                          }
-                        />
-                        <InlineStack gap="200">
-                          <Button primary submit loading={isSubmitting}>
-                            Enregistrer et tester
-                          </Button>
-                        </InlineStack>
-                      </FormLayout>
-                    )}
-                  </BlockStack>
-                </Form>
-              </Card>
-            </Layout.Section>
-
-            {/* Test Notification */}
-            {loaderData.hasBot && (
-              <Layout.Section>
-                <Card>
-                  <Form method="post">
-                    <input type="hidden" name="actionType" value="testNotification" />
-                    <BlockStack gap="400">
-                      <Text as="h2" variant="headingMd">
-                        Tester les notifications Telegram
-                      </Text>
-                      <FormLayout>
-                        <TextField
-                          label="Votre Telegram Chat ID"
-                          name="testChatId"
-                          value={testChatId}
-                          onChange={setTestChatId}
-                          autoComplete="off"
-                          placeholder="123456789"
-                          helpText={
-                            <span>
-                              Obtenez votre Chat ID en envoyant un message à{" "}
-                              <a href="https://t.me/userinfobot" target="_blank" rel="noopener noreferrer">
-                                @userinfobot
-                              </a>{" "}
-                              sur Telegram
-                            </span>
-                          }
-                        />
-                        <Button submit loading={isSubmitting}>
-                          Envoyer une notification de test
-                        </Button>
-                      </FormLayout>
-                    </BlockStack>
-                  </Form>
-                </Card>
-              </Layout.Section>
-            )}
           </Layout>
 
           {/* WhatsApp Configuration */}
@@ -801,10 +546,6 @@ export default function SettingsPage() {
                   </Text>
                   <BlockStack gap="200">
                     <Text variant="bodyMd" as="p">
-                      <strong>Telegram:</strong> Ouvrez Telegram et cherchez @BotFather. Envoyez /newbot et suivez les
-                      instructions pour créer votre bot.
-                    </Text>
-                    <Text variant="bodyMd" as="p">
                       <strong>WhatsApp:</strong> Générez un QR code et scannez-le avec WhatsApp sur votre téléphone.
                     </Text>
                     <Text variant="bodyMd" as="p">
@@ -812,8 +553,8 @@ export default function SettingsPage() {
                       sont réinitialisées chaque jour à minuit UTC.
                     </Text>
                     <Text variant="bodyMd" as="p">
-                      <strong>Mode "Les deux":</strong> Telegram est essayé en premier. Si l'agent n'a pas Telegram ou
-                      si l'envoi échoue, WhatsApp est utilisé comme backup.
+                      <strong>Attribution:</strong> Les commandes sont automatiquement attribuées aux livreurs en fonction
+                      des produits configurés dans la section Livreurs.
                     </Text>
                   </BlockStack>
                 </BlockStack>

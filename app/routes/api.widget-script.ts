@@ -151,11 +151,12 @@ function generateSimpleWidget(shopName: string, phoneNumber: string, defaultMess
       return;
     }
     
-    // Prevent duplicate widgets
-    if (document.getElementById('wa-widget')) {
-      console.warn('[WhatsApp Widget] Widget already exists, skipping initialization');
+    // Prevent duplicate widgets (use global flag for race condition protection)
+    if (window.__WA_WIDGET_INITIALIZED__ || document.getElementById('wa-widget')) {
+      console.warn('[WhatsApp Widget] Widget already exists or initializing, skipping');
       return;
     }
+    window.__WA_WIDGET_INITIALIZED__ = true;
     
     // Wait for DOM ready
     if (document.readyState === 'loading') {
@@ -316,11 +317,12 @@ function generateMultiStepWidget(
       }
     }
     
-    // Prevent duplicate widgets
-    if (document.getElementById('wa-widget')) {
-      console.warn('[WhatsApp Widget] Widget already exists, skipping');
+    // Prevent duplicate widgets (use global flag for race condition protection)
+    if (window.__WA_WIDGET_INITIALIZED__ || document.getElementById('wa-widget')) {
+      console.warn('[WhatsApp Widget] Widget already exists or initializing, skipping');
       return;
     }
+    window.__WA_WIDGET_INITIALIZED__ = true;
     
     // [M1] Wait for DOM ready before initializing
     if (document.readyState === 'loading') {
