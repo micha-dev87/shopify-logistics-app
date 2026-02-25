@@ -45,7 +45,7 @@ import type { AgentRole, DeliveryAgent } from "@prisma/client";
 // LOADER - Fetch all agents for current shop
 // ============================================================
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
+  const { session, admin } = await authenticate.admin(request);
   const shopDomain = session.shop;
 
   const shop = await prisma.shop.findUnique({
@@ -53,12 +53,39 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     include: {
       deliveryAgents: {
         orderBy: { createdAt: "desc" },
+        include: { assignedProducts: true },
       },
     },
   });
 
   if (!shop) {
     return redirect("/app");
+  }
+
+  // Récupérer les produits du shop via l'API Shopify
+  let shopifyProducts: Array<{ id: string; title: string; handle: string }> = [];
+  try {
+    const productsResponse = await admin.graphql(`
+      query {
+        products(first: 250) {
+          edges {
+            node {
+              id
+              title
+              handle
+            }
+          }
+        }
+      }
+    `);
+    const productsData = await productsResponse.json();
+    shopifyProducts = (productsData.data?.products?.edges || []).map((edge: any) => ({
+      id: edge.node.id.replace("gid://shopify/Product/", ""),
+      title: edge.node.title,
+      handle: edge.node.handle,
+    }));
+  } catch (err) {
+    console.error("[Agents] Erreur lors du chargement des produits Shopify:", err);
   }
 
   const currentPlan = shop.plan || PLAN_BASIC;
@@ -78,7 +105,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     telegramUserId: agent.telegramUserId || "-",
     isActive: agent.isActive,
     createdAt: agent.createdAt.toISOString(),
-    billsCount: 0, // Will be populated if needed
+    billsCount: 0,
+    assignedProductIds: agent.assignedProducts.map((p) => p.shopifyProductId),
   }));
 
   return json({
@@ -88,6 +116,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     activeAgentsCount,
     agents,
     canAddAgent: activeAgentsCount < planLimit,
+    shopifyProducts,
   });
 };
 
@@ -117,6 +146,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const city = (formData.get("city") as string) || null;
         const role = (formData.get("role") as AgentRole) || "COURIER";
         const telegramUserId = (formData.get("telegramUserId") as string) || null;
+        const assignedProductsRaw = (formData.get("assignedProducts") as string) || "[]";
+        const assignedProducts: Array<{ id: string; title: string; handle: string }> = JSON.parse(assignedProductsRaw);
 
         // Check plan limit
         const currentPlan = shop.plan || PLAN_BASIC;
@@ -141,6 +172,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             role,
             telegramUserId,
             isActive: true,
+            assignedProducts: {
+              create: assignedProducts.map((p) => ({
+                shopifyProductId: p.id,
+                productTitle: p.title,
+                productHandle: p.handle || null,
+              })),
+            },
           },
         });
 
@@ -155,6 +193,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const city = (formData.get("city") as string) || null;
         const role = (formData.get("role") as AgentRole) || "COURIER";
         const telegramUserId = (formData.get("telegramUserId") as string) || null;
+        const assignedProductsRaw = (formData.get("assignedProducts") as string) || "[]";
+        const assignedProducts: Array<{ id: string; title: string; handle: string }> = JSON.parse(assignedProductsRaw);
 
         // Verify agent belongs to this shop
         const existingAgent = await prisma.deliveryAgent.findFirst({
@@ -165,6 +205,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           return json({ error: "Livreur non trouvé" }, { status: 404 });
         }
 
+        // Remplacer tous les produits assignés
+        await prisma.agentProduct.deleteMany({ where: { agentId } });
         const agent = await prisma.deliveryAgent.update({
           where: { id: agentId },
           data: {
@@ -174,6 +216,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             city,
             role,
             telegramUserId,
+            assignedProducts: {
+              create: assignedProducts.map((p) => ({
+                shopifyProductId: p.id,
+                productTitle: p.title,
+                productHandle: p.handle || null,
+              })),
+            },
           },
         });
 
@@ -311,6 +360,7 @@ export default function AgentsPage() {
   const [formCity, setFormCity] = useState("");
   const [formRole, setFormRole] = useState<AgentRole>("COURIER");
   const [formTelegramUserId, setFormTelegramUserId] = useState("");
+  const [formAssignedProducts, setFormAssignedProducts] = useState<Array<{ id: string; title: string; handle: string }>>([]);
 
   // Filter state
   const [queryValue, setQueryValue] = useState("");
@@ -338,6 +388,7 @@ export default function AgentsPage() {
     setFormCity("");
     setFormRole("COURIER");
     setFormTelegramUserId("");
+    setFormAssignedProducts([]);
     setSelectedAgent(null);
   };
 
@@ -349,6 +400,12 @@ export default function AgentsPage() {
     setFormCity(agent.city || "");
     setFormRole(agent.role);
     setFormTelegramUserId(agent.telegramUserId || "");
+    setFormAssignedProducts(
+      agent.assignedProductIds.map((pid) => {
+        const product = loaderData.shopifyProducts.find((p) => p.id === pid);
+        return { id: pid, title: product?.title || pid, handle: product?.handle || "" };
+      })
+    );
     setShowEditModal(true);
   };
 
@@ -582,6 +639,27 @@ export default function AgentsPage() {
                   autoComplete="off"
                   helpText="Identifiant numérique de l'utilisateur Telegram pour les notifications"
                 />
+                <input type="hidden" name="assignedProducts" value={JSON.stringify(formAssignedProducts)} />
+                <BlockStack gap="200">
+                  <Text as="p" variant="bodyMd" fontWeight="semibold">Produits assignés</Text>
+                  <Text as="p" variant="bodySm" tone="subdued">Sélectionnez les produits pour lesquels ce livreur recevra les notifications</Text>
+                  <BlockStack gap="100">
+                    {loaderData.shopifyProducts.map((product) => (
+                      <Checkbox
+                        key={product.id}
+                        label={product.title}
+                        checked={formAssignedProducts.some((p) => p.id === product.id)}
+                        onChange={(checked) => {
+                          if (checked) {
+                            setFormAssignedProducts((prev) => [...prev, product]);
+                          } else {
+                            setFormAssignedProducts((prev) => prev.filter((p) => p.id !== product.id));
+                          }
+                        }}
+                      />
+                    ))}
+                  </BlockStack>
+                </BlockStack>
               </FormLayout>
             </Form>
           </Modal.Section>
@@ -657,6 +735,27 @@ export default function AgentsPage() {
                   onChange={setFormTelegramUserId}
                   autoComplete="off"
                 />
+                <input type="hidden" name="assignedProducts" value={JSON.stringify(formAssignedProducts)} />
+                <BlockStack gap="200">
+                  <Text as="p" variant="bodyMd" fontWeight="semibold">Produits assignés</Text>
+                  <Text as="p" variant="bodySm" tone="subdued">Sélectionnez les produits pour lesquels ce livreur recevra les notifications</Text>
+                  <BlockStack gap="100">
+                    {loaderData.shopifyProducts.map((product) => (
+                      <Checkbox
+                        key={product.id}
+                        label={product.title}
+                        checked={formAssignedProducts.some((p) => p.id === product.id)}
+                        onChange={(checked) => {
+                          if (checked) {
+                            setFormAssignedProducts((prev) => [...prev, product]);
+                          } else {
+                            setFormAssignedProducts((prev) => prev.filter((p) => p.id !== product.id));
+                          }
+                        }}
+                      />
+                    ))}
+                  </BlockStack>
+                </BlockStack>
               </FormLayout>
             </Form>
           </Modal.Section>

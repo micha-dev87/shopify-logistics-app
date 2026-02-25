@@ -88,6 +88,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const lineItem = orderData.line_items?.[0] || {};
     const productTitle = lineItem.title || "Produit";
     const productQuantity = lineItem.quantity || 1;
+    const productId = lineItem.product_id?.toString() || null; // Shopify product ID pour l'attribution
 
     // Get product image (need to fetch from Shopify API or use placeholder)
     const productImage = lineItem.image?.src || null;
@@ -136,8 +137,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       shop,
     });
 
-    // Run automatic attribution algorithm
-    await assignBestAgent(bill.id, shopRecord.id, customerCountry, customerCity);
+    // Run automatic attribution algorithm (par produit, fallback pays/ville)
+    await assignBestAgent(bill.id, shopRecord.id, productId, customerCountry, customerCity);
 
     // Return 200 quickly to avoid Shopify retries
     return json({ success: true, billId: bill.id }, { status: 200 });
@@ -150,80 +151,112 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
 // ============================================================
 // ATTRIBUTION ALGORITHM
-// Finds the best delivery agent based on:
-// 1. Same country as customer
-// 2. Same city (priority if available)
-// 3. Least number of active bills
+// Priorité:
+//   1. Agent ayant ce produit dans ses assignedProducts (charge minimale)
+//   2. Fallback: agent du même pays/ville (comportement original)
 // ============================================================
 async function assignBestAgent(
   billId: string,
   shopId: string,
+  productId: string | null,
   customerCountry: string | null,
   customerCity: string | null
 ): Promise<void> {
   try {
-    // Find active agents for this shop
-    const agents = await prisma.deliveryAgent.findMany({
-      where: {
-        shopId,
-        isActive: true,
-        role: { in: ["COURIER", "BOTH"] }, // Only couriers can be assigned
-      },
-      include: {
-        _count: {
-          select: {
-            deliveryBills: {
-              where: {
-                status: { in: ["PENDING", "ASSIGNED", "IN_PROGRESS"] },
+    let selectedAgent: { id: string; name: string; telegramUserId: string | null; whatsappJid: string | null; phone: string; _count: { deliveryBills: number } } | null = null;
+    let attributionSource = "unknown";
+
+    // === Étape 1 : Attribution par produit ===
+    if (productId) {
+      const agentsByProduct = await prisma.deliveryAgent.findMany({
+        where: {
+          shopId,
+          isActive: true,
+          role: { in: ["COURIER", "BOTH"] },
+          assignedProducts: { some: { shopifyProductId: productId } },
+        },
+        include: {
+          _count: {
+            select: {
+              deliveryBills: {
+                where: { status: { in: ["PENDING", "ASSIGNED", "IN_PROGRESS"] } },
               },
             },
           },
         },
-      },
-    });
+      });
 
-    if (agents.length === 0) {
-      console.log("[Attribution] No active couriers available", { shopId, billId });
-      return;
-    }
-
-    // Filter agents by country match (if customer country is known)
-    let eligibleAgents = agents;
-    if (customerCountry) {
-      const countryMatches = agents.filter((a) => a.country === customerCountry);
-      if (countryMatches.length > 0) {
-        eligibleAgents = countryMatches;
-
-        // Further filter by city if available
-        if (customerCity) {
-          const cityMatches = countryMatches.filter(
-            (a) => a.city?.toLowerCase() === customerCity.toLowerCase()
-          );
-          if (cityMatches.length > 0) {
-            eligibleAgents = cityMatches;
-          }
-        }
+      if (agentsByProduct.length > 0) {
+        agentsByProduct.sort((a, b) => a._count.deliveryBills - b._count.deliveryBills);
+        selectedAgent = agentsByProduct[0];
+        attributionSource = "product_match";
+        console.log("[Attribution] Agent trouvé via produit", {
+          billId, productId, agentId: selectedAgent.id, agentName: selectedAgent.name,
+        });
       }
     }
 
-    // Sort by least active bills
-    eligibleAgents.sort((a, b) => a._count.deliveryBills - b._count.deliveryBills);
+    // === Étape 2 : Fallback pays/ville si aucun agent par produit ===
+    if (!selectedAgent) {
+      const allAgents = await prisma.deliveryAgent.findMany({
+        where: {
+          shopId,
+          isActive: true,
+          role: { in: ["COURIER", "BOTH"] },
+        },
+        include: {
+          _count: {
+            select: {
+              deliveryBills: {
+                where: { status: { in: ["PENDING", "ASSIGNED", "IN_PROGRESS"] } },
+              },
+            },
+          },
+        },
+      });
 
-    // Select the best agent (first in sorted list)
-    const selectedAgent = eligibleAgents[0];
+      if (allAgents.length === 0) {
+        console.log("[Attribution] No active couriers available", { shopId, billId });
+        return;
+      }
+
+      let eligibleAgents = allAgents;
+      if (customerCountry) {
+        const countryMatches = allAgents.filter((a) => a.country === customerCountry);
+        if (countryMatches.length > 0) {
+          eligibleAgents = countryMatches;
+          if (customerCity) {
+            const cityMatches = countryMatches.filter(
+              (a) => a.city?.toLowerCase() === customerCity.toLowerCase()
+            );
+            if (cityMatches.length > 0) {
+              eligibleAgents = cityMatches;
+            }
+          }
+        }
+      }
+
+      eligibleAgents.sort((a, b) => a._count.deliveryBills - b._count.deliveryBills);
+      selectedAgent = eligibleAgents[0] || null;
+      attributionSource = "country_city_fallback";
+
+      if (selectedAgent) {
+        console.log("[Attribution] Agent trouvé via fallback pays/ville", {
+          billId, customerCountry, customerCity, agentId: selectedAgent.id,
+        });
+      }
+    }
 
     if (!selectedAgent) {
-      console.log("[Attribution] No eligible agent found", { shopId, billId, customerCountry, customerCity });
+      console.log("[Attribution] No eligible agent found", { shopId, billId, productId, customerCountry });
       return;
     }
 
-    // Update bill with assigned agent
-    const bill = await prisma.deliveryBill.findUnique({
-      where: { id: billId },
-    });
+    // === Assigner l'agent au bon de livraison ===
+    const bill = await prisma.deliveryBill.findUnique({ where: { id: billId } });
 
     if (!bill || bill.status !== "PENDING") {
-      return; // Bill was already assigned or doesn't exist
+      return; // Déjà assigné ou inexistant
     }
 
     const statusHistory = (bill.statusHistory as any[]) || [];
@@ -232,7 +265,7 @@ async function assignBestAgent(
       timestamp: new Date().toISOString(),
       agentId: selectedAgent.id,
       agentName: selectedAgent.name,
-      source: "automatic_attribution",
+      source: attributionSource,
     });
 
     await prisma.deliveryBill.update({
@@ -244,44 +277,33 @@ async function assignBestAgent(
       },
     });
 
-    console.log("[Attribution] Assigned agent to bill", {
+    console.log("[Attribution] Agent assigné au bon", {
       billId,
       agentId: selectedAgent.id,
       agentName: selectedAgent.name,
-      activeBillsCount: selectedAgent._count.deliveryBills,
+      source: attributionSource,
     });
 
-    // Send notification based on shop's notification mode
-    // Priority: Telegram first, WhatsApp as backup (if BOTH mode)
+    // === Envoyer la notification ===
     try {
-      // Fetch agent with shop relation for notification
       const agentWithShop = await prisma.deliveryAgent.findUnique({
         where: { id: selectedAgent.id },
         include: { shop: true },
       });
 
-      if (!agentWithShop) {
-        console.log("[Attribution] Agent not found for notification", { agentId: selectedAgent.id });
-        return;
-      }
+      if (!agentWithShop) return;
 
-      const updatedBill = await prisma.deliveryBill.findUnique({
-        where: { id: billId },
-      });
-
-      if (!updatedBill) {
-        console.log("[Attribution] Bill not found for notification", { billId });
-        return;
-      }
+      const updatedBill = await prisma.deliveryBill.findUnique({ where: { id: billId } });
+      if (!updatedBill) return;
 
       const shop = agentWithShop.shop;
       const notificationMode = shop.notificationMode || "TELEGRAM";
-      
+
       let notificationSent = false;
       let usedPlatform = "";
 
-      // TELEGRAM or BOTH: Try Telegram first
-      if ((notificationMode === "TELEGRAM" || notificationMode === "BOTH") && 
+      // Telegram en priorité
+      if ((notificationMode === "TELEGRAM" || notificationMode === "BOTH") &&
           selectedAgent.telegramUserId && shop.telegramBotToken) {
         const notifResult = await notifyAgentOfDelivery(
           agentWithShop as any,
@@ -297,72 +319,44 @@ async function assignBestAgent(
               telegramMessageId: notifResult.messageId?.toString() || null,
             },
           });
-
           notificationSent = true;
           usedPlatform = "Telegram";
-          
-          console.log("[Attribution] Telegram notification sent", {
-            billId,
-            agentId: selectedAgent.id,
-            messageId: notifResult.messageId,
-          });
+          console.log("[Attribution] Notification Telegram envoyée", { billId, agentId: selectedAgent.id });
         } else {
-          console.error("[Attribution] Telegram notification failed", {
-            billId,
-            agentId: selectedAgent.id,
-            error: notifResult.error,
-          });
+          console.error("[Attribution] Notification Telegram échouée", { billId, error: notifResult.error });
         }
       }
 
-      // WHATSAPP or BOTH (as backup): Try WhatsApp if Telegram failed or mode is WHATSAPP only
-      // Note: notifyAgentViaWhatsApp handles JID fallback and session check internally
+      // WhatsApp en fallback (ou mode exclusif)
       if (!notificationSent &&
           (notificationMode === "WHATSAPP" || notificationMode === "BOTH") &&
           (selectedAgent.whatsappJid || selectedAgent.phone)) {
-        const notifResult = await notifyAgentViaWhatsApp(
-          agentWithShop as any,
-          updatedBill,
-        );
+        const notifResult = await notifyAgentViaWhatsApp(agentWithShop as any, updatedBill);
 
         if (notifResult.success) {
           notificationSent = true;
           usedPlatform = "WhatsApp";
-          
-          console.log("[Attribution] WhatsApp notification sent", {
-            billId,
-            agentId: selectedAgent.id,
-            messageId: notifResult.messageId,
-          });
+          console.log("[Attribution] Notification WhatsApp envoyée", { billId, agentId: selectedAgent.id });
         } else {
-          console.error("[Attribution] WhatsApp notification failed", {
-            billId,
-            agentId: selectedAgent.id,
-            error: notifResult.error,
-          });
+          console.error("[Attribution] Notification WhatsApp échouée", { billId, error: notifResult.error });
         }
       }
 
-      if (notificationSent) {
-        console.log("[Attribution] Notification sent successfully via", {
-          billId,
-          platform: usedPlatform,
-        });
-      } else {
-        console.log("[Attribution] No notification sent - no platform available", {
-          billId,
-          agentId: selectedAgent.id,
+      if (!notificationSent) {
+        console.log("[Attribution] Aucune notification envoyée", {
+          billId, agentId: selectedAgent.id,
           hasTelegram: !!selectedAgent.telegramUserId,
           hasWhatsApp: !!selectedAgent.whatsappJid,
           notificationMode,
         });
+      } else {
+        console.log("[Attribution] Notification envoyée via", { billId, platform: usedPlatform });
       }
     } catch (notifError) {
-      // Don't fail the attribution if notification fails
-      console.error("[Attribution] Error sending notification:", notifError);
+      console.error("[Attribution] Erreur notification:", notifError);
     }
   } catch (error) {
-    console.error("[Attribution] Error in assignment algorithm:", error);
+    console.error("[Attribution] Erreur algorithme:", error);
   }
 }
 

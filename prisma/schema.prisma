@@ -94,9 +94,25 @@ model DeliveryAgent {
 
   shop          Shop           @relation(fields: [shopId], references: [id], onDelete: Cascade)
   deliveryBills DeliveryBill[]
+  assignedProducts AgentProduct[]
 
   @@index([shopId, country, city, isActive])
   @@index([shopId, isActive])
+}
+
+// Table de jointure Agent <-> Produits Shopify assignés
+model AgentProduct {
+  id               String        @id @default(cuid())
+  agentId          String
+  agent            DeliveryAgent @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  shopifyProductId String        // Shopify product ID (ex: "8765432109")
+  productTitle     String        // Titre du produit pour affichage
+  productHandle    String?       // Handle Shopify
+  createdAt        DateTime      @default(now())
+
+  @@unique([agentId, shopifyProductId])
+  @@index([agentId])
+  @@index([shopifyProductId])
 }
 
 // WhatsApp session for Baileys authentication persistence
