@@ -691,6 +691,7 @@ class WhatsAppService {
         error: error instanceof Error ? error.message : "Failed to send message",
       };
     }
+  }
   
   /**
    * Disconnect WhatsApp
