@@ -715,6 +715,23 @@ class WhatsAppService {
     
     await setDisconnected(this.shopId);
     
+    // CRITICAL FIX: Clear credentials so next connect() generates a fresh QR code.
+    // Without this, Baileys finds existing credentials in the DB and silently reconnects
+    // to the old WhatsApp session instead of showing a new QR code after disconnection.
+    try {
+      await prisma.whatsAppSession.updateMany({
+        where: { shopId: this.shopId },
+        data: {
+          creds: {},
+          keys: {},
+          lastQr: null,
+          qrExpiry: null,
+        },
+      });
+    } catch (_e) {
+      // Ignore errors during credential cleanup
+    }
+    
     const statusCallback = statusCallbacks.get(this.shopId);
     if (statusCallback) {
       statusCallback({ connected: false });
