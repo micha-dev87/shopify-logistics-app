@@ -530,20 +530,20 @@ class WhatsAppService {
         
         await setDisconnected(this.shopId);
         
-        // 405 = Connection Failure = pre-keys are cryptographically invalid on WA servers
-        // (usually caused by a conflicting external Baileys session)
-        // Clear credentials so next connect() generates a fresh QR code instead of looping
-        if (statusCode === 405) {
-          console.log('[WhatsApp] 405 Connection Failure — clearing corrupted credentials for fresh QR');
+        // 405 = Connection Failure (corrupted pre-keys)
+        // 401 = Unauthorized / Logged out (session expired or banned)
+        // Both cases: clear credentials so next connect() generates a fresh QR
+        if (statusCode === 405 || statusCode === DisconnectReason.loggedOut) {
+          console.log(`[WhatsApp] ${statusCode} error — clearing credentials for fresh QR`);
           try {
             await prisma.whatsAppSession.updateMany({
               where: { shopId: this.shopId },
-              data: { creds: {}, keys: {} },
+              data: { creds: {}, keys: {}, lastQr: null, qrExpiry: null },
             });
           } catch (_e) {}
           activeSockets.delete(this.shopId);
           if (statusCallback) {
-            statusCallback({ connected: false, error: 'Session expirée — reconnectez-vous pour générer un nouveau QR' });
+            statusCallback({ connected: false, error: 'Session expirée — générez un nouveau QR pour vous reconnecter' });
           }
           return; // Do NOT schedule a reconnect
         }
