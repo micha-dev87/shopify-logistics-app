@@ -111,6 +111,22 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       ? `${orderData.total_price} ${orderData.currency || "XAF"}`
       : null;
 
+    // Format order date (French locale, UTC+1 West/Central Africa)
+    const orderDate = orderData.created_at
+      ? new Date(orderData.created_at).toLocaleString('fr-FR', {
+          timeZone: 'Africa/Lagos',
+          year: 'numeric', month: 'short', day: 'numeric',
+          hour: '2-digit', minute: '2-digit',
+        })
+      : null;
+
+    // Product URL from shop domain + slugified title
+    const productSlug = productTitle
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+    const productUrl = productSlug ? `https://${shop}/products/${productSlug}` : null;
+
     // Create delivery bill
     const bill = await prisma.deliveryBill.create({
       data: {
@@ -145,6 +161,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     await assignBestAgent(bill.id, shopRecord.id, productId, customerCountry, customerCity, {
       province: customerProvince || undefined,
       totalPrice: orderTotalPrice || undefined,
+      orderDate: orderDate || undefined,
+      productUrl: productUrl || undefined,
     });
 
     // Return 200 quickly to avoid Shopify retries
@@ -168,7 +186,7 @@ async function assignBestAgent(
   productId: string | null,
   customerCountry: string | null,
   customerCity: string | null,
-  extraInfo?: { province?: string; totalPrice?: string }
+  extraInfo?: { province?: string; totalPrice?: string; orderDate?: string; productUrl?: string }
 ): Promise<void> {
   try {
     let selectedAgent: { id: string; name: string; whatsappJid: string | null; phone: string; country: string; _count: { deliveryBills: number } } | null = null;

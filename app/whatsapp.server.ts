@@ -5,6 +5,7 @@ import type { DeliveryBill, DeliveryAgent, Shop } from "@prisma/client";
 import prisma from "./db.server";
 import { Redis } from "ioredis";
 import QRCode from "qrcode";
+import crypto from "crypto";
 
 // ============================================================
 // TYPES
@@ -35,6 +36,8 @@ interface DeliveryNotificationData {
   city?: string;
   province?: string;
   totalPrice?: string;
+  orderDate?: string;
+  productUrl?: string;
 }
 
 interface ConnectionStatus {
@@ -69,6 +72,14 @@ const COUNTRY_PHONE_CODES: Record<string, string> = {
   FR: "33", US: "1", CA: "1", GB: "44", DE: "49", BE: "32", CH: "41", IT: "39", ES: "34", PT: "351",
 };
 
+// ============================================================
+// STATUS TOKEN (HMAC pour liens de mise à jour de statut)
+// ============================================================
+
+export function generateStatusToken(billId: string, status: string): string {
+  const secret = process.env.SHOPIFY_WEBHOOK_SIGNING_SECRET || process.env.SHOPIFY_API_SECRET || 'whatsapp-status-default';
+  return crypto.createHmac('sha256', secret).update(`${billId}:${status}`).digest('hex').slice(0, 16);
+}
 
 // ============================================================
 // REDIS CLIENT (Singleton)
@@ -655,8 +666,7 @@ class WhatsAppService {
     }
     
     try {
-      const message = this.formatDeliveryMessage(bill);
-      const buttons = this.createDeliveryButtons(billId);
+      const message = this.formatDeliveryMessage(bill, billId);
       
       // Add random delay for human-like behavior (2-5 seconds)
       const delay = Math.floor(Math.random() * 3000) + 2000;
@@ -670,16 +680,12 @@ class WhatsAppService {
         result = await this.socket.sendMessage(jid, {
           image: { url: bill.productImage },
           caption: message,
-          buttons,
-          headerType: 4, // 4 = image header
           mimetype: 'image/jpeg',
         });
       } else {
         console.log('[WhatsApp] Sending delivery notification (text only)');
         result = await this.socket.sendMessage(jid, {
           text: message,
-          buttons,
-          headerType: 1,
         });
       }
       
@@ -824,17 +830,23 @@ class WhatsAppService {
   // PRIVATE HELPERS
   // ============================================================
   
-  private formatDeliveryMessage(bill: DeliveryNotificationData): string {
+  private formatDeliveryMessage(bill: DeliveryNotificationData, billId: string): string {
+    const appUrl = process.env.APP_URL || 'https://multi.innovvision-group.com';
+    const t1 = generateStatusToken(billId, 'IN_PROGRESS');
+    const t2 = generateStatusToken(billId, 'DELIVERED');
+    const t3 = generateStatusToken(billId, 'NOT_DELIVERED');
     const lines: string[] = [];
     lines.push(`🆕 *Nouvelle commande:* ${bill.shopName || ""}`);
     lines.push(``);
     lines.push(`🔖 *Commande n°:* ${bill.orderName || "N/A"}`);
+    if (bill.orderDate) lines.push(`🗓️ *Date:* ${bill.orderDate}`);
     if (bill.country) lines.push(`🌍 *Pays:* ${bill.country}`);
     if (bill.city) lines.push(`🏙️ *Ville:* ${bill.city}`);
     lines.push(`🧑 *Client:* ${bill.customerName}`);
     lines.push(`📞 *Téléphone:* ${bill.customerPhone || "Non renseigné"}`);
     lines.push(``);
     lines.push(`🛍️ *Produit:* ${bill.productTitle}`);
+    if (bill.productUrl) lines.push(`🔗 ${bill.productUrl}`);
     lines.push(`📊 *Quantité:* ${bill.productQuantity}`);
     if (bill.totalPrice) lines.push(`💸 *Montant total:* ${bill.totalPrice}`);
     if (bill.province) {
@@ -843,8 +855,16 @@ class WhatsAppService {
       lines.push(`Province: ${bill.province}`);
     }
     lines.push(``);
-    lines.push(`🗂️ *Statut de livraison*`);
-    lines.push(`_Cliquez sur un bouton ci-dessous pour mettre à jour le statut:_`);
+    lines.push(`🗂️ *Mettre à jour le statut:*`);
+    lines.push(``);
+    lines.push(`📦 *Pris en charge*`);
+    lines.push(`${appUrl}/api/bill-status?id=${billId}&s=IN_PROGRESS&t=${t1}`);
+    lines.push(``);
+    lines.push(`✅ *Livré*`);
+    lines.push(`${appUrl}/api/bill-status?id=${billId}&s=DELIVERED&t=${t2}`);
+    lines.push(``);
+    lines.push(`❌ *Non livré*`);
+    lines.push(`${appUrl}/api/bill-status?id=${billId}&s=NOT_DELIVERED&t=${t3}`);
     return lines.join("\n");
   }
   
@@ -980,7 +1000,7 @@ export function createWhatsAppService(shopId: string): WhatsAppService {
 export async function notifyAgentViaWhatsApp(
   agent: DeliveryAgent & { shop: Shop },
   bill: DeliveryBill,
-  extra?: { country?: string; city?: string; province?: string; totalPrice?: string }
+  extra?: { country?: string; city?: string; province?: string; totalPrice?: string; orderDate?: string; productUrl?: string }
 ): Promise<{ success: boolean; messageId?: string; error?: string }> {
   // Build JID from whatsappJid or fallback to phone number
   // Auto-add country code if phone number appears to be local (less than 11 digits)
@@ -1036,6 +1056,8 @@ export async function notifyAgentViaWhatsApp(
       city: extra?.city,
       province: extra?.province,
       totalPrice: extra?.totalPrice,
+      orderDate: extra?.orderDate,
+      productUrl: extra?.productUrl,
     },
     bill.id
   );
