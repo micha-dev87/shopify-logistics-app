@@ -6,14 +6,20 @@
 
 {% if block.settings.enabled %}
   <script>
-    // Guard contre la duplication : si le widget ScriptTag (wa-widget) est déjà présent,
-    // on n'injecte pas le widget Theme App Extension pour éviter le doublon.
-    if (document.getElementById('wa-widget') || document.getElementById('logistics-whatsapp-widget')) {
-      console.warn('[WhatsApp Widget] Widget already present, skipping Theme Extension render');
-    } else {
+    // Guard IMMÉDIAT contre la duplication (ScriptTag ET Theme Extension)
+    // On vérifie ET on positionne le flag AVANT que l'autre script puisse s'exécuter
+    (function() {
+      if (window.__WA_WIDGET_INITIALIZED__ || document.getElementById('wa-widget') || document.getElementById('logistics-whatsapp-widget')) {
+        console.warn('[WhatsApp Widget Theme Ext] Widget already present (flag or DOM), skipping');
+        return;
+      }
+      // Positionner le flag IMMÉDIATEMENT pour bloquer le ScriptTag s'il arrive après
+      window.__WA_WIDGET_INITIALIZED__ = true;
+      
       document.addEventListener('DOMContentLoaded', function() {
+        // Double-check au cas où le DOM aurait changé
         if (document.getElementById('wa-widget') || document.getElementById('logistics-whatsapp-widget')) {
-          console.warn('[WhatsApp Widget] Widget already present after DOMContentLoaded, skipping');
+          console.warn('[WhatsApp Widget Theme Ext] Widget appeared in DOM before DOMContentLoaded, skipping');
           return;
         }
         var container = document.createElement('div');
@@ -41,7 +47,7 @@
         container.appendChild(link);
         document.body.appendChild(container);
       });
-    }
+    })();
   </script>
   <style>
     #logistics-whatsapp-widget a:focus {
@@ -55,17 +61,7 @@
     }
   </style>
 
-  <style>
-    #logistics-whatsapp-widget a:focus {
-      outline: 2px solid {{ block.settings.button_color }};
-      outline-offset: 2px;
-    }
-    @media (max-width: 768px) {
-      #logistics-whatsapp-widget {
-        bottom: {{ block.settings.bottom_position | plus: 10 }}px !important;
-      }
-    }
-  </style>
+
 {% endif %}
 
 {% schema %}
