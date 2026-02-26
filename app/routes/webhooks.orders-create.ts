@@ -31,10 +31,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   // Read raw body for HMAC verification
   const rawBody = await request.text();
 
-  // Verify HMAC
-  const secret = process.env.SHOPIFY_API_SECRET;
+  // Verify HMAC - utiliser le signing secret des webhooks manuels, fallback sur API secret
+  const secret = process.env.SHOPIFY_WEBHOOK_SIGNING_SECRET || process.env.SHOPIFY_API_SECRET;
   if (!secret) {
-    console.error("[Webhook] SHOPIFY_API_SECRET not configured");
+    console.error("[Webhook] No webhook secret configured");
     return json({ error: "Server configuration error" }, { status: 500 });
   }
 
