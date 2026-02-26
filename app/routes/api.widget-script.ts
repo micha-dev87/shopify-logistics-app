@@ -460,6 +460,17 @@ function generateMultiStepWidget(
       // Uses composedPath() because clearChildren() removes clicked elements from DOM
       // before this handler runs, causing widget.contains(e.target) to return false
       outsideClickHandler = function(e) {
+        // Ne pas fermer si le clic est sur un élément de formulaire ou dans un formulaire
+        var target = e.target;
+        if (target && (
+          target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.tagName === 'LABEL' ||
+          (target.closest && target.closest('form'))
+        )) {
+          return;
+        }
         var isInside = false;
         if (e.composedPath) {
           var evtPath = e.composedPath();
@@ -518,7 +529,10 @@ function generateMultiStepWidget(
         btn.setAttribute('aria-expanded', 'false');
         currentView = 'button';
         selectedCountry = null;
-        btn.focus();
+        // Ne voler le focus que si aucun champ de formulaire n'est actuellement actif
+        var active = document.activeElement;
+        var isFormActive = active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.tagName === 'SELECT');
+        if (!isFormActive) { btn.focus(); }
       }
       
       function showCountries() {

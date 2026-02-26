@@ -30,6 +30,11 @@ interface DeliveryNotificationData {
   productTitle: string;
   productImage: string | null;
   productQuantity: number;
+  shopName?: string;
+  country?: string;
+  city?: string;
+  province?: string;
+  totalPrice?: string;
 }
 
 interface ConnectionStatus {
@@ -820,18 +825,27 @@ class WhatsAppService {
   // ============================================================
   
   private formatDeliveryMessage(bill: DeliveryNotificationData): string {
-    return `🚚 *Nouvelle livraison assignée*
-
-📦 *Commande:* ${bill.orderName || "N/A"}
-
-👤 *Client:* ${bill.customerName}
-📍 *Adresse:* ${bill.customerAddress}
-📞 *Téléphone:* ${bill.customerPhone || "Non renseigné"}
-
-🛍️ *Produit:* ${bill.productTitle}
-📊 *Quantité:* ${bill.productQuantity}
-
-_Cliquez sur un bouton ci-dessous pour mettre à jour le statut._`;
+    const lines: string[] = [];
+    lines.push(`🆕 *Nouvelle commande:* ${bill.shopName || ""}`);
+    lines.push(``);
+    lines.push(`🔖 *Commande n°:* ${bill.orderName || "N/A"}`);
+    if (bill.country) lines.push(`🌍 *Pays:* ${bill.country}`);
+    if (bill.city) lines.push(`🏙️ *Ville:* ${bill.city}`);
+    lines.push(`🧑 *Client:* ${bill.customerName}`);
+    lines.push(`📞 *Téléphone:* ${bill.customerPhone || "Non renseigné"}`);
+    lines.push(``);
+    lines.push(`🛍️ *Produit:* ${bill.productTitle}`);
+    lines.push(`📊 *Quantité:* ${bill.productQuantity}`);
+    if (bill.totalPrice) lines.push(`💸 *Montant total:* ${bill.totalPrice}`);
+    if (bill.province) {
+      lines.push(``);
+      lines.push(`ℹ️ *Informations supplémentaires:*`);
+      lines.push(`Province: ${bill.province}`);
+    }
+    lines.push(``);
+    lines.push(`🗂️ *Statut de livraison*`);
+    lines.push(`_Cliquez sur un bouton ci-dessous pour mettre à jour le statut:_`);
+    return lines.join("\n");
   }
   
   private createDeliveryButtons(billId: string): WhatsAppButton[] {
@@ -965,7 +979,8 @@ export function createWhatsAppService(shopId: string): WhatsAppService {
  */
 export async function notifyAgentViaWhatsApp(
   agent: DeliveryAgent & { shop: Shop },
-  bill: DeliveryBill
+  bill: DeliveryBill,
+  extra?: { country?: string; city?: string; province?: string; totalPrice?: string }
 ): Promise<{ success: boolean; messageId?: string; error?: string }> {
   // Build JID from whatsappJid or fallback to phone number
   // Auto-add country code if phone number appears to be local (less than 11 digits)
@@ -1016,6 +1031,11 @@ export async function notifyAgentViaWhatsApp(
       productTitle: bill.productTitle,
       productImage: bill.productImage,
       productQuantity: bill.productQuantity,
+      shopName: agent.shop.name,
+      country: extra?.country,
+      city: extra?.city,
+      province: extra?.province,
+      totalPrice: extra?.totalPrice,
     },
     bill.id
   );

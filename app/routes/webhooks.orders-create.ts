@@ -106,6 +106,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     // Extract country from shipping address
     const customerCountry = extractCountryCode(shippingAddress.country_code || shippingAddress.country);
     const customerCity = shippingAddress.city || null;
+    const customerProvince = shippingAddress.province || null;
+    const orderTotalPrice = orderData.total_price
+      ? `${orderData.total_price} ${orderData.currency || "XAF"}`
+      : null;
 
     // Create delivery bill
     const bill = await prisma.deliveryBill.create({
@@ -138,7 +142,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     });
 
     // Run automatic attribution algorithm (par produit, fallback pays/ville)
-    await assignBestAgent(bill.id, shopRecord.id, productId, customerCountry, customerCity);
+    await assignBestAgent(bill.id, shopRecord.id, productId, customerCountry, customerCity, {
+      province: customerProvince || undefined,
+      totalPrice: orderTotalPrice || undefined,
+    });
 
     // Return 200 quickly to avoid Shopify retries
     return json({ success: true, billId: bill.id }, { status: 200 });
@@ -160,7 +167,8 @@ async function assignBestAgent(
   shopId: string,
   productId: string | null,
   customerCountry: string | null,
-  customerCity: string | null
+  customerCity: string | null,
+  extraInfo?: { province?: string; totalPrice?: string }
 ): Promise<void> {
   try {
     let selectedAgent: { id: string; name: string; whatsappJid: string | null; phone: string; country: string; _count: { deliveryBills: number } } | null = null;
@@ -299,7 +307,11 @@ async function assignBestAgent(
       const shop = agentWithShop.shop;
       // Notification WhatsApp uniquement
       if (selectedAgent.whatsappJid || selectedAgent.phone) {
-        const notifResult = await notifyAgentViaWhatsApp(agentWithShop as any, updatedBill);
+        const notifResult = await notifyAgentViaWhatsApp(agentWithShop as any, updatedBill, {
+          country: customerCountry || undefined,
+          city: customerCity || undefined,
+          ...extraInfo,
+        });
 
         if (notifResult.success) {
           console.log("[Attribution] Notification WhatsApp envoyée", { billId, agentId: selectedAgent.id });
