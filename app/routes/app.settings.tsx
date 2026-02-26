@@ -1,6 +1,6 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { Form, useActionData, useLoaderData, useNavigation, useFetcher } from "@remix-run/react";
+import { Form, useActionData, useLoaderData, useNavigation, useFetcher, useRevalidator } from "@remix-run/react";
 import {
   Page,
   Layout,
@@ -152,6 +152,7 @@ export default function SettingsPage() {
   const testDeliveryFetcher = useFetcher();
   const agentsFetcher = useFetcher();
   const isSubmitting = navigation.state === "submitting";
+  const revalidator = useRevalidator();
 
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [toastError, setToastError] = useState(false);
@@ -182,10 +183,10 @@ export default function SettingsPage() {
     }
   }, [actionData]);
 
-  // Poll WhatsApp status when waiting for connection
+  // Poll WhatsApp status tant que pas connecté (même sans QR visible)
   useEffect(() => {
-    if (waStatus?.qrCode && !waStatus.connected) {
-      pollingRef.current = setInterval(async () => {
+    if (!waStatus?.connected) {
+      pollingRef.current = setInterval(() => {
         statusFetcher.load("/api/whatsapp/status");
       }, 3000);
     }
@@ -193,23 +194,28 @@ export default function SettingsPage() {
     return () => {
       if (pollingRef.current) {
         clearInterval(pollingRef.current);
+        pollingRef.current = null;
       }
     };
-  }, [waStatus?.qrCode, waStatus?.connected]);
+  }, [waStatus?.connected]);
 
   // Update status from fetcher
   useEffect(() => {
     if (statusFetcher.data?.success) {
-      setWaStatus(statusFetcher.data.connection);
+      const newStatus = statusFetcher.data.connection;
+      setWaStatus(newStatus);
       setRateLimit(statusFetcher.data.rateLimit);
-      
-      // Generate QR code image URL
-      if (statusFetcher.data.connection.qrCode && !statusFetcher.data.connection.connected) {
-        generateQRCodeImage(statusFetcher.data.connection.qrCode);
+
+      if (newStatus?.qrCode && !newStatus?.connected) {
+        generateQRCodeImage(newStatus.qrCode);
+      }
+
+      // Connexion détectée → revalider le loader pour rafraîchir toutes les données
+      if (newStatus?.connected) {
+        revalidator.revalidate();
       }
     }
   }, [statusFetcher.data]);
-
   // Generate QR code image
   // The server sends qrCode as a ready-to-use data:image/png;base64,... URL
   // No need to decode or re-render — just use it directly as <img src>
@@ -225,9 +231,14 @@ export default function SettingsPage() {
   // Handle QR fetcher response
   useEffect(() => {
     if (qrFetcher.data?.success) {
-      setWaStatus(qrFetcher.data.status);
-      if (qrFetcher.data.status?.qrCode) {
-        generateQRCodeImage(qrFetcher.data.status.qrCode);
+      const newStatus = qrFetcher.data.status;
+      setWaStatus(newStatus);
+      if (newStatus?.qrCode) {
+        generateQRCodeImage(newStatus.qrCode);
+      }
+      // Si déjà connecté (reconnexion rapide), revalider le loader
+      if (newStatus?.connected) {
+        revalidator.revalidate();
       }
     }
   }, [qrFetcher.data]);
