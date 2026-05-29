@@ -1142,6 +1142,83 @@ export async function notifyAgentViaWhatsApp(
 }
 
 /**
+ * Notify the shop owner (their own connected WhatsApp) that a courier changed a bill's status.
+ * Best-effort: never throws, out of the daily quota.
+ */
+export async function notifyOwnerOnStatusChange(
+  shopId: string,
+  billId: string,
+  previousStatus: string,
+  newStatus: string,
+  source: string
+): Promise<void> {
+  try {
+    const bill = await prisma.deliveryBill.findUnique({
+      where: { id: billId },
+      include: { shop: true, assignedAgent: true },
+    });
+    if (!bill) return;
+
+    const ownerPhoneRaw = bill.shop.whatsappPhone;
+    if (!ownerPhoneRaw) return;
+
+    const session = await prisma.whatsAppSession.findUnique({ where: { shopId } });
+    if (!session?.connected) return;
+
+    // Strip device suffix ("14508221064:85" -> "14508221064"), keep digits only.
+    const ownerNumber = ownerPhoneRaw.split(":")[0].replace(/\D/g, "");
+    if (!ownerNumber) return;
+    const ownerJid = `${ownerNumber}@s.whatsapp.net`;
+
+    const storeHandle = bill.shop.domain.replace(/\.myshopify\.com$/, "");
+    const appHandle = process.env.ADMIN_APP_HANDLE || "logistics-app-9";
+    const billsLink = `https://admin.shopify.com/store/${storeHandle}/apps/${appHandle}/app/bills`;
+
+    const when = new Date().toLocaleString("fr-FR", {
+      timeZone: "Africa/Lagos",
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+    const oldLabel = STATUS_LABELS_FULL[previousStatus] || previousStatus;
+    const newLabel = STATUS_LABELS_FULL[newStatus] || newStatus;
+    const agentName = bill.assignedAgent?.name || "Non assigné";
+
+    const message = [
+      `🔔 *Mise à jour de livraison* — ${bill.shop.name}`,
+      ``,
+      `🔖 *Commande:* ${bill.orderName || "N/A"}`,
+      `🛍️ *Produit:* ${bill.productTitle} (×${bill.productQuantity})`,
+      `🔗 ${billsLink}`,
+      ``,
+      `🚚 *Assigné à:* ${agentName}`,
+      `📊 *Statut:* ${oldLabel} → ${newLabel}`,
+      `🕒 ${when}`,
+      ``,
+      `🧑 *Client:* ${bill.customerName}`,
+      `📞 *Téléphone:* ${bill.customerPhone || "Non renseigné"}`,
+    ].join("\n");
+
+    const service = createWhatsAppService(shopId);
+    const res = await service.sendOwnerNotification(
+      ownerJid,
+      message,
+      bill.productImage ?? undefined
+    );
+
+    if (res.success) {
+      console.log("[OwnerNotif] Sent", { shopId, billId, previousStatus, newStatus, source });
+    } else {
+      console.error("[OwnerNotif] Failed", { shopId, billId, error: res.error });
+    }
+  } catch (error) {
+    console.error("[OwnerNotif] Error:", error);
+  }
+}
+
+/**
  * Send a delivery notification to a specific JID
  * Used for testing and manual notifications
  */
