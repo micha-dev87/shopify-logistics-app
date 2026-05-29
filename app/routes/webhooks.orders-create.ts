@@ -2,6 +2,7 @@ import type { ActionFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import crypto from "crypto";
 import prisma from "../db.server";
+import { unauthenticated } from "../shopify.server";
 
 import { notifyAgentViaWhatsApp } from "../whatsapp.server";
 
@@ -89,9 +90,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const productTitle = lineItem.title || "Produit";
     const productQuantity = lineItem.quantity || 1;
     const productId = lineItem.product_id?.toString() || null; // Shopify product ID pour l'attribution
+    const variantId = lineItem.variant_id?.toString() || null;
 
-    // Get product image (need to fetch from Shopify API or use placeholder)
-    const productImage = lineItem.image?.src || null;
+    // The orders/create webhook payload does not include line-item images,
+    // so fetch the product/variant image from the Admin API below (after the
+    // duplicate check, to avoid an API call for already-processed orders).
+    let productImage: string | null = lineItem.image?.src || null;
 
     // Check for duplicate (idempotency)
     const existingBill = await prisma.deliveryBill.findUnique({
@@ -101,6 +105,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     if (existingBill) {
       console.log("[Webhook] Duplicate order ignored", { orderId, shop });
       return json({ message: "Order already processed" }, { status: 200 });
+    }
+
+    if (!productImage) {
+      productImage = await fetchProductImageUrl(shop, productId, variantId);
     }
 
     // Extract country from shipping address
@@ -348,6 +356,55 @@ async function assignBestAgent(
     }
   } catch (error) {
     console.error("[Attribution] Erreur algorithme:", error);
+  }
+}
+
+// ============================================================
+// HELPER: Fetch product/variant image from the Shopify Admin API
+// The orders/create webhook payload has no line-item image, so we look it up.
+// Best-effort: any failure returns null and the notification falls back to text.
+// ============================================================
+async function fetchProductImageUrl(
+  shop: string,
+  productId: string | null,
+  variantId: string | null
+): Promise<string | null> {
+  if (!productId && !variantId) return null;
+
+  try {
+    const { admin } = await unauthenticated.admin(shop);
+
+    if (variantId) {
+      const response = await admin.graphql(
+        `#graphql
+        query VariantImage($id: ID!) {
+          productVariant(id: $id) {
+            image { url }
+            product { featuredImage { url } }
+          }
+        }`,
+        { variables: { id: `gid://shopify/ProductVariant/${variantId}` } }
+      );
+      const variant = (await response.json())?.data?.productVariant;
+      const url = variant?.image?.url || variant?.product?.featuredImage?.url;
+      if (url) return url;
+    }
+
+    if (productId) {
+      const response = await admin.graphql(
+        `#graphql
+        query ProductImage($id: ID!) {
+          product(id: $id) { featuredImage { url } }
+        }`,
+        { variables: { id: `gid://shopify/Product/${productId}` } }
+      );
+      return (await response.json())?.data?.product?.featuredImage?.url || null;
+    }
+
+    return null;
+  } catch (error) {
+    console.error("[Webhook] Failed to fetch product image:", error);
+    return null;
   }
 }
 
