@@ -23,6 +23,14 @@ yarn-error.log*
 # local env files
 .env*.local
 
+# MCP / Claude Code local config (may contain tokens later)
+.mcp.json
+.claude/settings.local.json
+
+# Playwright MCP local state
+.playwright-mcp/
+e2e-*.png
+
 # vercel
 .vercel
 
