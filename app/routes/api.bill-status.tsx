@@ -1,6 +1,7 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import crypto from "crypto";
 import prisma from "../db.server";
+import { notifyOwnerOnStatusChange } from "../whatsapp.server";
 
 // ============================================================
 // STATUS UPDATE via lien WhatsApp
@@ -82,6 +83,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
     newStatus: status,
     orderName: bill.orderName,
   });
+
+  // Notify the shop owner (best-effort). bill.status is the pre-update status captured above.
+  try {
+    await notifyOwnerOnStatusChange(bill.shopId, billId, bill.status, status, "whatsapp_url_link");
+  } catch (e) {
+    console.error("[BillStatus] Owner notification failed:", e);
+  }
 
   return new Response(
     successHtml(STATUS_LABELS[status] || status, bill.orderName || billId),
