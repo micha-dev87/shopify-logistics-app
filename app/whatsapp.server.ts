@@ -1034,6 +1034,9 @@ async function handleButtonClick(shopId: string, buttonId: string, fromJid: stri
         text: `✅ Statut mis à jour: *${statusLabel}*`,
       });
     }
+
+    // Notify the shop owner (best-effort, out of quota). bill.status is the pre-update status.
+    await notifyOwnerOnStatusChange(shopId, billId, bill.status, newStatus, "whatsapp_callback");
   } catch (error) {
     console.error("[WhatsApp Callback] Error processing button click:", error);
   }
