@@ -703,7 +703,59 @@ class WhatsAppService {
       };
     }
   }
-  
+
+  /**
+   * Send a notification to the shop owner's own connected number.
+   * Out of the daily quota (does NOT call incrementRateLimit). Best-effort.
+   */
+  async sendOwnerNotification(
+    jid: string,
+    text: string,
+    imageUrl?: string
+  ): Promise<{ success: boolean; messageId?: string; error?: string }> {
+    if (!this.socket) {
+      this.socket = activeSockets.get(this.shopId);
+    }
+
+    if (!this.socket) {
+      const session = await prisma.whatsAppSession.findUnique({
+        where: { shopId: this.shopId },
+      });
+      if (!session?.connected) {
+        return { success: false, error: "WhatsApp not connected" };
+      }
+      await this.connect(() => {}, () => {});
+      for (let i = 0; i < 15; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        this.socket = activeSockets.get(this.shopId);
+        if (this.socket) break;
+      }
+      if (!this.socket) {
+        return { success: false, error: "WhatsApp not connected - reconnect failed" };
+      }
+    }
+
+    try {
+      let result;
+      if (imageUrl && imageUrl.startsWith("http")) {
+        result = await this.socket.sendMessage(jid, {
+          image: { url: imageUrl },
+          caption: text,
+          mimetype: "image/jpeg",
+        });
+      } else {
+        result = await this.socket.sendMessage(jid, { text });
+      }
+      // NOTE: deliberately NOT calling incrementRateLimit — owner notifications are out of quota.
+      return { success: true, messageId: result?.key?.id };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : "Failed to send owner notification",
+      };
+    }
+  }
+
   /**
    * Disconnect WhatsApp
    */
@@ -986,6 +1038,15 @@ async function handleButtonClick(shopId: string, buttonId: string, fromJid: stri
     console.error("[WhatsApp Callback] Error processing button click:", error);
   }
 }
+
+const STATUS_LABELS_FULL: Record<string, string> = {
+  PENDING: "⏳ En attente",
+  ASSIGNED: "📋 Assigné",
+  IN_PROGRESS: "📦 Pris en charge",
+  DELIVERED: "✅ Livré",
+  NOT_DELIVERED: "❌ Non livré",
+  CANCELLED: "🚫 Annulé",
+};
 
 function getStatusLabel(status: string): string {
   const labels: Record<string, string> = {
